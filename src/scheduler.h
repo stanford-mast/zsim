@@ -39,6 +39,7 @@
 #include "g_std/g_unordered_set.h"
 #include "g_std/g_vector.h"
 #include "intrusive_list.h"
+#include "interval_timer.h"
 #include "proc_stats.h"
 #include "process_stats.h"
 #include "stats.h"
@@ -169,7 +170,7 @@ class Scheduler : public GlobAlloc, public Callee {
 
     public:
         Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum) :
-            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134)
+            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer(64)
         {
             contexts.resize(numCores);
             for (uint32_t i = 0; i < numCores; i++) {
@@ -436,6 +437,9 @@ class Scheduler : public GlobAlloc, public Callee {
 
             assert(curPhase == zinfo->numPhases); //check they don't skew
 
+            //Interval timer ticks at the end of each phase
+            intervalTimer.phaseTick();
+
             //Wake up all sleeping threads where deadline is met
             if (!sleepQueue.empty()) {
                 ThreadInfo* th = sleepQueue.front();
@@ -550,6 +554,9 @@ class Scheduler : public GlobAlloc, public Callee {
         }
 
         uint32_t getScheduledPid(uint32_t cid) const { return (contexts[cid].state == USED)? getPid(contexts[cid].curThread->gid) : (uint32_t)-1; }
+
+        //Interval timer for alarm() and get/setitimer()
+        IntervalTimer intervalTimer;
 
     private:
         void schedule(ThreadInfo* th, ContextInfo* ctx) {
