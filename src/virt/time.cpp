@@ -307,3 +307,89 @@ uint64_t VirtGetPhaseRDTSC() {
     return zinfo->clockDomainInfo[domain].rdtscOffset + zinfo->globPhaseCycles;
 }
 
+// SYS_alarm
+
+PostPatchFn PatchAlarmSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_alarm);
+    trace(TimeVirt, "Patching SYS_alarm");
+    unsigned int secs = (unsigned int) PIN_GetSyscallArgument(ctxt, std, 0);
+    unsigned int secsRemain = zinfo->sched->intervalTimer.setAlarm(getpid(), secs);
+
+    //Turn this into a NOP by setting the argument to 0 (clears old timers)
+    PIN_SetSyscallArgument(ctxt, std, 0, 0);
+
+    //Postpatch to restore the arg and set the return value
+    return [secs, secsRemain](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Restore pre-call argument
+        PIN_SetSyscallArgument(ctxt, std, 0, secs);
+
+        //Set the return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = secsRemain;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_getitimer
+
+PostPatchFn PatchGetitimerSyscall(PrePatchArgs args) {
+    return NullPostPatch;
+}
+
+// SYS_setitimer
+
+PostPatchFn PatchSetitimerSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_setitimer);
+    trace(TimeVirt, "Patching SYS_setitimer");
+
+    //Grab new and old itimerval args
+    ADDRINT arg0 = PIN_GetSyscallArgument(ctxt, std, 0);
+    ADDRINT arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+    struct itimerval* newVal = new struct itimerval();
+    PIN_SafeCopy(newVal, (void *)arg1, sizeof(struct itimerval));
+    struct itimerval* oldVal = new struct itimerval();
+    int res = zinfo->sched->intervalTimer.setIntervalTimer(getpid(), (int)arg0, newVal, oldVal);
+
+    //Turn this into a NOP by disabling the timer
+    memset(newVal, 0, sizeof(struct itimerval));
+    PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)newVal);
+
+    //Postpatch to set newVal, oldVal and the return value
+    return [arg1, newVal, oldVal, res](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Reset newVal
+        PIN_SetSyscallArgument(ctxt, std, 1, arg1);
+
+        //Set oldVal and free memory
+        ADDRINT arg2 = PIN_GetSyscallArgument(ctxt, std, 2);
+        PIN_SafeCopy((void *)arg2, oldVal, sizeof(struct itimerval));
+        delete newVal;
+        delete oldVal;
+
+        //Set return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = res;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
