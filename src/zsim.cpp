@@ -711,52 +711,116 @@ void VdsoInit() {
 // Register hooks to intercept and virtualize time-related vsyscalls and vdso syscalls, as they do not show up as syscalls!
 // NOTE: getcpu is also a VDSO syscall, but is not patched for now
 
-// Per-thread VDSO data
-struct VdsoPatchData {
+// vDSO patch data for a single thread in a single context (multiple contexts allow signal handlers)
+struct VdsoPatchSingleton {
     // Input arguments --- must save them because they are not caller-saved
     // Careful: REG is 32 bits; PIN_REGISTER, which is the actual type of the
     // pointer, is 64 bits but opaque. We just use ADDRINT, it works
     ADDRINT arg0, arg1;
     VdsoFunc func;
     uint32_t level;  // if 0, invalid. Used for VDSO-internal calls
+
+    VdsoPatchSingleton(ADDRINT _arg0, ADDRINT _arg1, VdsoFunc _func, uint32_t _level) : arg0(_arg0), arg1(_arg1), func(_func), level(_level) {};
+    VdsoPatchSingleton() : arg0(0), arg1(0), func(VdsoFunc(0)), level(0) {};
 };
-VdsoPatchData vdsoPatchData[MAX_THREADS];
+
+// Per-thread vDSO context stack. New stack entries are pushed after a pin ContextChange callback (typically a signal),
+// and popped lazily after a return from such a context (a SIGRETURN reason in the ContextChange callback).
+// Without such a mechanism it would be incorrect to call vDSO functions within a signal handler if the prior context were already processing a vDSO
+class VdsoPatchStack {
+    private:
+        std::vector<VdsoPatchSingleton> patchStack[MAX_THREADS];
+
+    public:
+        VdsoPatchStack() {
+            // Each thread starts with vdso info for level 0 (i.e., not in a signal handler)
+            // This is never popped for performance reasons
+            for (uint32_t i = 0; i < MAX_THREADS; i++) {
+                patchStack[i].resize(1);
+            }
+        };
+        VdsoPatchSingleton &peek(THREADID tid) {
+            assert(patchStack[tid].size() > 0);
+            return patchStack[tid].back();
+        };
+        void push(THREADID tid, ADDRINT arg0, ADDRINT arg1, VdsoFunc func, uint32_t level) {
+            patchStack[tid].emplace_back(arg0, arg1, func, level);
+        };
+        void pop(THREADID tid) {
+            assert(patchStack[tid].size() > 0);
+            patchStack[tid].pop_back();
+        };
+        uint32_t size(THREADID tid) {
+            return (uint32_t)patchStack[tid].size();
+        };
+};
+VdsoPatchStack vdsoPatchData;
+
+// Per-thread signal depth info. (0 -> not in a signal handler, n>0 -> in level 'n' signal handler)
+unsigned int signalStackDepth[MAX_THREADS] = {};
 
 // Analysis functions
 
+// Helper function to laziliy clean up old vdso signal stacks. The alternative would be to register these actions for the SIGRETURN callback
+void vdsoDeferredStackCleanup(THREADID tid) {
+    if ((vdsoPatchData.size(tid) - 1) > signalStackDepth[tid]) {
+        // We need to clean up an old vdso fram from an earlier handler
+        if (vdsoPatchData.peek(tid).level) {
+            warn("vDSO missed a return in a context frame for tid %d", tid);
+        }
+        vdsoPatchData.pop(tid);
+    }
+}
+
+
 VOID VdsoEntryPoint(THREADID tid, uint32_t func, ADDRINT arg0, ADDRINT arg1) {
-    if (vdsoPatchData[tid].level) {
-        // common, in Ubuntu 11.10 several vdso functions jump back to the callpoint
-        // info("vDSO function (%d) called from vdso (%d), level %d, skipping", func, vdsoPatchData[tid].func, vdsoPatchData[tid].level);
+    uint32_t vdsoDepth = vdsoPatchData.size(tid) - 1;
+    uint32_t sigStackDepth = signalStackDepth[tid];
+    if (vdsoDepth < sigStackDepth) {
+        // We're in a new signal handler and need new vdso state for this context
+        vdsoPatchData.push(tid, arg0, arg1, (VdsoFunc)func, 1);
     } else {
-        vdsoPatchData[tid].arg0 = arg0;
-        vdsoPatchData[tid].arg1 = arg1;
-        vdsoPatchData[tid].func = (VdsoFunc)func;
-        vdsoPatchData[tid].level++;
+        vdsoDeferredStackCleanup(tid);
+        VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+        if (vdso.level) {
+            // common, in Ubuntu 11.10 several vdso functions jump back to the callpoint
+            // info("vDSO function (%d) called from vdso (%d), level %d, skipping", func, vdso.func, vdso.level);
+        } else {
+            vdso.arg0 = arg0;
+            vdso.arg1 = arg1;
+            vdso.func = (VdsoFunc)func;
+            vdso.level++;
+        }
     }
 }
 
 VOID VdsoCallPoint(THREADID tid) {
-    assert(vdsoPatchData[tid].level);
-    vdsoPatchData[tid].level++;
-    // info("vDSO internal callpoint, now level %d", vdsoPatchData[tid].level); //common
+    vdsoDeferredStackCleanup(tid);
+    VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+    assert(vdso.level);
+    vdso.level++;
+    // info("vDSO internal callpoint, now level %d", vdso.level); //common
 }
 
 VOID VdsoRetPoint(THREADID tid, REG* raxPtr) {
-    if (vdsoPatchData[tid].level == 0) {
+    vdsoDeferredStackCleanup(tid);
+
+    VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+    if (vdso.level == 0) {
         warn("vDSO return without matching call --- did we instrument all the functions?");
+        warn("    stack %d level %d", signalStackDepth[tid], vdso.level);
         return;
     }
-    vdsoPatchData[tid].level--;
-    if (vdsoPatchData[tid].level) {
-        // info("vDSO return post level %d, skipping ret handling", vdsoPatchData[tid].level); //common
+    vdso.level--;
+    if (vdso.level) {
+        // info("vDSO return post level %d, skipping ret handling", vdso.level); //common
         return;
     }
-    if (fPtrs[tid].type != FPTR_NOP || vdsoPatchData[tid].func == VF_GETCPU) {
-        // info("vDSO patching for func %d", vdsoPatchData[tid].func);  // common
-        ADDRINT arg0 = vdsoPatchData[tid].arg0;
-        ADDRINT arg1 = vdsoPatchData[tid].arg1;
-        switch (vdsoPatchData[tid].func) {
+    if (fPtrs[tid].type != FPTR_NOP || vdso.func == VF_GETCPU) {
+        // info("vDSO patching for func %d", vdso.func);  // common
+        ADDRINT arg0 = vdso.arg0;
+        ADDRINT arg1 = vdso.arg1;
+        switch (vdso.func) {
             case VF_CLOCK_GETTIME:
                 VirtClockGettime(tid, arg0, arg1);
                 break;
@@ -773,7 +837,7 @@ VOID VdsoRetPoint(THREADID tid, REG* raxPtr) {
                 }
                 break;
             default:
-                panic("vDSO garbled func %d", vdsoPatchData[tid].func);
+                panic("vDSO garbled func %d", vdso.func);
         }
     }
 }
@@ -960,9 +1024,12 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
             break;
         case CONTEXT_CHANGE_REASON_SIGNAL:
             reasonStr = "SIGNAL";
+            signalStackDepth[tid]++;
             break;
         case CONTEXT_CHANGE_REASON_SIGRETURN:
             reasonStr = "SIGRETURN";
+            assert(signalStackDepth[tid] > 0);
+            signalStackDepth[tid]--;
             break;
         case CONTEXT_CHANGE_REASON_APC:
             reasonStr = "APC";
@@ -975,7 +1042,7 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
             break;
     }
 
-    warn("[%d] ContextChange, reason %s, inSyscall %d", tid, reasonStr, inSyscall[tid]);
+    warn("[%d] ContextChange, reason %s (%d), inSyscall %d, sigLevel: %d", tid, reasonStr, info, inSyscall[tid], vdsoPatchData.peek(tid).level);
     if (inSyscall[tid]) {
         SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr);
     }
