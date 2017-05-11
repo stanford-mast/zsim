@@ -318,7 +318,7 @@ PostPatchFn PatchAlarmSyscall(PrePatchArgs args) {
     assert(syscall == SYS_alarm);
     trace(TimeVirt, "Patching SYS_alarm");
     unsigned int secs = (unsigned int) PIN_GetSyscallArgument(ctxt, std, 0);
-    unsigned int secsRemain = zinfo->sched->intervalTimer.setAlarm(getpid(), secs);
+    unsigned int secsRemain = zinfo->sched->intervalTimer.setAlarm(procIdx, secs);
 
     //Turn this into a NOP by setting the argument to 0 (clears old timers)
     PIN_SetSyscallArgument(ctxt, std, 0, 0);
@@ -364,7 +364,7 @@ PostPatchFn PatchSetitimerSyscall(PrePatchArgs args) {
     struct itimerval* newVal = new struct itimerval();
     PIN_SafeCopy(newVal, (void *)arg1, sizeof(struct itimerval));
     struct itimerval* oldVal = new struct itimerval();
-    int res = zinfo->sched->intervalTimer.setIntervalTimer(getpid(), (int)arg0, newVal, oldVal);
+    int res = zinfo->sched->intervalTimer.setIntervalTimer(procIdx, (int)arg0, newVal, oldVal);
 
     //Turn this into a NOP by disabling the timer
     memset(newVal, 0, sizeof(struct itimerval));
