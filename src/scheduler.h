@@ -39,7 +39,7 @@
 #include "g_std/g_unordered_set.h"
 #include "g_std/g_vector.h"
 #include "intrusive_list.h"
-#include "interval_timer.h"
+#include "virt/interval_timer.h"
 #include "proc_stats.h"
 #include "process_stats.h"
 #include "stats.h"
