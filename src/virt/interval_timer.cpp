@@ -18,13 +18,13 @@ void IntervalTimer::signalOrderedInsert(SignalInfo* si) {
 }
 
 //The only reason this is private is because it assumes the lock is already held
-void IntervalTimer::scheduleSignal(pid_t pid, int sig, uint64_t phase, uint64_t period) {
+void IntervalTimer::scheduleSignal(pid_t osPid, int sig, uint64_t phase, uint64_t period) {
     SignalInfo* si = new SignalInfo(); //delete when dequeued
-    si->pid = pid;
+    si->osPid = osPid;
     si->sig = sig;
     si->phase = phase;
     si->period = period;
-    trace(Sched, "Queueing signal %d for pid %d phase %lu (cur %lu, delta %lu)", sig, pid, phase, curPhase, phase - curPhase);
+    trace(Sched, "Queueing signal %d for pid %d phase %lu (cur %lu, delta %lu)", sig, osPid, phase, curPhase, phase - curPhase);
     signalOrderedInsert(si);
 }
 
@@ -55,10 +55,10 @@ void IntervalTimer::phaseTick() {
             if (vi->cyclesTrigger <= processCycles[vi->pidGrpIdx]) {
                 switch (vi->type) {
                     case ITIMER_VIRTUAL:
-                        scheduleSignal(vi->pid, SIGVTALRM, curPhase, 0);
+                        scheduleSignal(vi->osPid, SIGVTALRM, curPhase, 0);
                         break;
                     case ITIMER_PROF:
-                        scheduleSignal(vi->pid, SIGPROF, curPhase, 0);
+                        scheduleSignal(vi->osPid, SIGPROF, curPhase, 0);
                         break;
                     default:
                         warn("Invalid VTimeInfo type %d", vi->type);
@@ -80,10 +80,12 @@ void IntervalTimer::phaseTick() {
         SignalInfo* si = signalQueue.front();
         while (si && si->phase <= curPhase) {
             assert(si->phase == curPhase);
-            trace(Sched, "Sending delayed signal %d to pid %d at phase %lu", si->sig, si->pid, curPhase);
+            trace(Sched, "Sending delayed signal %d to pid %d at phase %lu", si->sig, si->osPid, curPhase);
+
+            //XXX TODO: May need to unblock sleeping threads first
 
             //Note that SYS_tgkill could be used instead to target a specific thread
-            syscall(SYS_kill, si->pid, si->sig);
+            syscall(SYS_kill, si->osPid, si->sig);  // XXX errno is not thread-safe for pin tools. Check
 
             signalQueue.pop_front();
 
@@ -100,14 +102,14 @@ void IntervalTimer::phaseTick() {
     futex_unlock(&timerLock);
 }
 
-unsigned int IntervalTimer::setAlarm(pid_t pid, unsigned int seconds) {
+unsigned int IntervalTimer::setAlarm(pid_t osPid, unsigned int seconds) {
     futex_lock(&timerLock);
     //Check if there was a prior alarm countdown and how much time it had left
     uint64_t priorPhaseRemain = 0;
     unsigned int priorSecRemain = 0;
     SignalInfo* si = signalQueue.front();
     while (si) {
-        if (si->pid == pid && si->sig == SIGALRM) {
+        if (si->osPid == osPid && si->sig == SIGALRM) {
             priorPhaseRemain = si->phase - curPhase;
             uint64_t priorCyclesRemain = priorPhaseRemain * zinfo->phaseLength;
             priorSecRemain = (unsigned int) (cyclesToNs(priorCyclesRemain) / NSPS);
@@ -117,27 +119,31 @@ unsigned int IntervalTimer::setAlarm(pid_t pid, unsigned int seconds) {
         }
         si = si->next;
     }
-    trace(Sched, "Last alarm for pid %d had %u seconds remaining", pid, priorSecRemain);
+    trace(Sched, "Last alarm for pid %d had %u seconds remaining", osPid, priorSecRemain);
 
     //Convert seconds into target phase then schedule
-    uint64_t waitNsecs = NSPS * (uint64_t) seconds;
-    uint64_t waitCycles = nsToCycles(waitNsecs);
-    uint64_t waitPhases = waitCycles / zinfo->phaseLength + 1; //wait at least 1 phase
-    uint64_t alarmPhase = zinfo->numPhases + waitPhases;
-    scheduleSignal(pid, SIGALRM, alarmPhase, 0);
+    if (seconds > 0) {
+        uint64_t waitNsecs = NSPS * (uint64_t) seconds;
+        uint64_t waitCycles = nsToCycles(waitNsecs);
+        uint64_t waitPhases = waitCycles / zinfo->phaseLength + 1; //wait at least 1 phase
+        uint64_t alarmPhase = zinfo->numPhases + waitPhases;
+        scheduleSignal(osPid, SIGALRM, alarmPhase, 0);
+    } else {
+      trace(Sched, "Alarm blocked for pid %d", osPid);
+    }
 
     futex_unlock(&timerLock);
     return priorSecRemain;
 }
 
-int IntervalTimer::getIntervalTimer(pid_t pid, int type, struct itimerval* val) {
+int IntervalTimer::getIntervalTimer(pid_t osPid, int type, struct itimerval* val) {
     futex_lock(&timerLock);
     int retval = 0;
     memset(val, 0, sizeof(struct itimerval));
     if (type == ITIMER_REAL) {
         SignalInfo* si = signalQueue.front();
         while (si) {
-            if (si->pid == pid && si->sig == SIGALRM) {
+            if (si->osPid == osPid && si->sig == SIGALRM) {
                 uint64_t remainCycles = (si->phase - curPhase) * zinfo->phaseLength;
                 uint64_t remainNsecs = cyclesToNs(remainCycles);
                 val->it_value.tv_sec = remainNsecs / NSPS;
@@ -150,7 +156,7 @@ int IntervalTimer::getIntervalTimer(pid_t pid, int type, struct itimerval* val) 
             }
         }
     } else if (type == ITIMER_VIRTUAL || type == ITIMER_PROF) {
-        uint32_t pidGrpIdx = zinfo->procArray[pid]->getGroupIdx(); //TODO: verify pid exists
+        uint32_t pidGrpIdx = zinfo->procArray[procIdx]->getGroupIdx();
         for (VTimeInfo *vi : processVTimers) {
             if (vi->pidGrpIdx == pidGrpIdx && vi->type == type) {
                 uint64_t remainNsecs = cyclesToNs(vi->cyclesTrigger - processCycles[pidGrpIdx]);
@@ -170,7 +176,7 @@ int IntervalTimer::getIntervalTimer(pid_t pid, int type, struct itimerval* val) 
     return retval;
 }
 
-int IntervalTimer::setIntervalTimer(pid_t pid, int type, const struct itimerval* newVal, struct itimerval* oldVal) {
+int IntervalTimer::setIntervalTimer(pid_t osPid, int type, const struct itimerval* newVal, struct itimerval* oldVal) {
     futex_lock(&timerLock);
     int retval = 0;
     uint64_t countdownNsecs = NSPS * (uint64_t) newVal->it_value.tv_sec;
@@ -190,7 +196,7 @@ int IntervalTimer::setIntervalTimer(pid_t pid, int type, const struct itimerval*
         //Remove any queued SIGALRMs (there should only be 0 or 1 entries)
         SignalInfo* si = signalQueue.front();
         while (si) {
-            if (si->pid == pid && si->sig == SIGALRM) {
+            if (si->osPid == osPid && si->sig == SIGALRM) {
                 //Fill out the oldVal info
                 uint64_t oldRemainCycles = (si->phase - curPhase) * zinfo->phaseLength;
                 uint64_t oldRemainNsecs = cyclesToNs(oldRemainCycles);
@@ -210,14 +216,14 @@ int IntervalTimer::setIntervalTimer(pid_t pid, int type, const struct itimerval*
         }
         // Nothing happens unless it_value was nonzero
         if (countdownNsecs > 0) {
-            scheduleSignal(pid, SIGALRM, alarmPhase, periodPhases);
+            scheduleSignal(osPid, SIGALRM, alarmPhase, periodPhases);
         }
     //Virtual time counting down CPU time used by all threads of a process
     } else if (type == ITIMER_VIRTUAL || type == ITIMER_PROF) {
         //TODO: Distinguish between ITIMER_VIRTUAL (no system call time) and ITIMER_PROF (with system calls)
 
         // Check for an existing interval and fill out the old value (or delete if new time is 0)
-        uint32_t pidGrpIdx = zinfo->procArray[pid]->getGroupIdx(); //TODO: verify pid exists
+        uint32_t pidGrpIdx = zinfo->procArray[procIdx]->getGroupIdx();
         bool exists = false;
         for (auto it = processVTimers.begin(); it != processVTimers.end(); ++it) {
             VTimeInfo* vi = *it;
@@ -229,7 +235,7 @@ int IntervalTimer::setIntervalTimer(pid_t pid, int type, const struct itimerval*
                 uint64_t oldPeriodNsecs = cyclesToNs(vi->cyclesPeriod);
                 oldVal->it_interval.tv_sec = oldPeriodNsecs / NSPS;
                 oldVal->it_interval.tv_usec = (oldPeriodNsecs % NSPS) / 1000;
-                assert(vi->pid == pid);
+                assert(vi->osPid == osPid);
                 if (countdownCycles > 0) {
                     vi->cyclesTrigger = countdownCycles + processCycles[pidGrpIdx];
                     vi->cyclesPeriod = periodCycles;
@@ -244,7 +250,7 @@ int IntervalTimer::setIntervalTimer(pid_t pid, int type, const struct itimerval*
             memset(oldVal, 0, sizeof(struct itimerval));
             if (countdownCycles > 0) {
                 VTimeInfo* vi = new VTimeInfo(); //deleted when removed from processVTimers
-                vi->pid = pid;
+                vi->osPid = osPid;
                 vi->pidGrpIdx = pidGrpIdx;
                 vi->type = type;
                 vi->cyclesTrigger = countdownCycles + processCycles[pidGrpIdx];
