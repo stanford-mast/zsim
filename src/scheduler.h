@@ -170,7 +170,7 @@ class Scheduler : public GlobAlloc, public Callee {
 
     public:
         Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum) :
-            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer(64)
+            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer((uint32_t)zinfo->lineSize)
         {
             contexts.resize(numCores);
             for (uint32_t i = 0; i < numCores; i++) {
