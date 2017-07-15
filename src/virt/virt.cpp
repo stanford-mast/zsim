@@ -58,9 +58,8 @@ void VirtInit() {
     for (uint32_t i = 0; i < MAX_SYSCALLS; i++) prePatchFunctions[i] = NullPatch;
 
     // Issue warnings on timing-sensitive syscalls
-    for (uint32_t syscall : {SYS_select, SYS_getitimer, SYS_alarm, SYS_setitimer, SYS_semop,
-            SYS_gettimeofday, SYS_times, SYS_rt_sigtimedwait, SYS_time, SYS_futex, SYS_mq_timedsend,
-            SYS_mq_timedreceive, SYS_pselect6, SYS_ppoll}) {
+    for (uint32_t syscall : {SYS_select, SYS_semop, SYS_gettimeofday, SYS_times, SYS_rt_sigtimedwait,
+            SYS_time, SYS_futex, SYS_mq_timedsend, SYS_mq_timedreceive, SYS_pselect6, SYS_ppoll}) {
         prePatchFunctions[syscall] = WarnTimingRelated;
     }
 
@@ -72,13 +71,13 @@ void VirtInit() {
 
 
 // Dispatch methods
-void VirtSyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, const char* patchRoot, bool isNopThread) {
+void VirtSyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, const char* patchRoot, long *actualSyscall, bool isNopThread) {
     uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
     if (syscall >= MAX_SYSCALLS) {
         warn("syscall %d out of range", syscall);
         postPatchFunctions[tid] = NullPostPatch;
     } else {
-        postPatchFunctions[tid] = prePatchFunctions[syscall]({tid, ctxt, std, patchRoot, isNopThread});
+        postPatchFunctions[tid] = prePatchFunctions[syscall]({tid, ctxt, std, patchRoot, actualSyscall, isNopThread});
     }
 }
 

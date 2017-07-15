@@ -39,6 +39,7 @@ struct PrePatchArgs {
     CONTEXT* ctxt;
     SYSCALL_STANDARD std;
     const char* patchRoot;
+    long *actualSyscall;  //Set this if the prepatch changes the syscall number
     bool isNopThread;
 };
 

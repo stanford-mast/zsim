@@ -51,6 +51,9 @@ PF(SYS_time, PatchTime);
 PF(SYS_clock_gettime, PatchClockGettime);
 PF(SYS_nanosleep, PatchNanosleep);
 PF(SYS_clock_nanosleep, PatchNanosleep);
+PF(SYS_alarm, PatchAlarmSyscall);
+PF(SYS_getitimer, PatchGetitimerSyscall);
+PF(SYS_setitimer, PatchSetitimerSyscall);
 
 // Timeout virtualization -- timeout.cpp
 PF(SYS_futex, PatchTimeoutSyscall);

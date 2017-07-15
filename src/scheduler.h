@@ -39,6 +39,7 @@
 #include "g_std/g_unordered_set.h"
 #include "g_std/g_vector.h"
 #include "intrusive_list.h"
+#include "virt/interval_timer.h"
 #include "proc_stats.h"
 #include "process_stats.h"
 #include "stats.h"
@@ -168,8 +169,8 @@ class Scheduler : public GlobAlloc, public Callee {
         inline uint32_t getTid(uint32_t gid) const {return gid & 0x0FFFF;}
 
     public:
-        Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum) :
-            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134)
+        Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum, uint32_t _maxProcesses) :
+            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer(_maxProcesses)
         {
             contexts.resize(numCores);
             for (uint32_t i = 0; i < numCores; i++) {
@@ -436,6 +437,9 @@ class Scheduler : public GlobAlloc, public Callee {
 
             assert(curPhase == zinfo->numPhases); //check they don't skew
 
+            //Interval timer ticks at the end of each phase
+            intervalTimer.phaseTick();
+
             //Wake up all sleeping threads where deadline is met
             if (!sleepQueue.empty()) {
                 ThreadInfo* th = sleepQueue.front();
@@ -482,7 +486,8 @@ class Scheduler : public GlobAlloc, public Callee {
             return res;
         }
 
-        void notifySleepEnd(uint32_t pid, uint32_t tid) {
+        uint64_t notifySleepEnd(uint32_t pid, uint32_t tid) {
+            uint64_t wakeupPhase;
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
             ThreadInfo* th = gidMap[gid];
@@ -495,7 +500,9 @@ class Scheduler : public GlobAlloc, public Callee {
                 sleepQueue.remove(th);
                 th->state = BLOCKED;
             }
+            wakeupPhase = th->wakeupPhase;
             futex_unlock(&schedLock);
+            return wakeupPhase;
         }
 
         void printThreadState(uint32_t pid, uint32_t tid) {
@@ -550,6 +557,9 @@ class Scheduler : public GlobAlloc, public Callee {
         }
 
         uint32_t getScheduledPid(uint32_t cid) const { return (contexts[cid].state == USED)? getPid(contexts[cid].curThread->gid) : (uint32_t)-1; }
+
+        //Interval timer for alarm() and get/setitimer()
+        IntervalTimer intervalTimer;
 
     private:
         void schedule(ThreadInfo* th, ContextInfo* ctx) {

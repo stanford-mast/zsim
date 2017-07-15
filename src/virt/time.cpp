@@ -217,6 +217,8 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
     struct timespec* rem = (struct timespec*) PIN_GetSyscallArgument(ctxt, std, isClock? 3 : 1);
 
     // Turn this into a non-timed FUTEX_WAIT syscall
+    trace(TimeVirt, "[%d] Changing actual syscall to SYS_futex (%d)", args.tid, SYS_futex);
+    *(args.actualSyscall) = SYS_futex;
     PIN_SetSyscallNumber(ctxt, std, SYS_futex);
     PIN_SetSyscallArgument(ctxt, std, 0, (ADDRINT)futexWord);
     PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)FUTEX_WAIT);
@@ -233,8 +235,15 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
             trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
         }
 
+        //TODO: Doesn't clock_nanosleep directly return the (positive) errno?
         int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
-        if (res == EWOULDBLOCK) {
+        if (wakeupPhase > zinfo->numPhases) {
+            // Assume this is due to a signal interruption (rather than zsim bug)
+            trace(TimeVirt, "Sleep woke up early (%lu phases); assuming a signal and setting EINTR",
+                wakeupPhase - zinfo->numPhases);
+            res = EINTR;
+            PIN_SetSyscallNumber(ctxt, std, -EINTR);
+        } else if (res == EWOULDBLOCK) {
             trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
             PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
         } else if (res == EINTR) {
@@ -254,7 +263,7 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
         if (rem) {
             if (res == EINTR) {
                 assert(wakeupPhase >= zinfo->numPhases);  // o/w why is this EINTR...
-                uint64_t remainingCycles = wakeupPhase - zinfo->numPhases;
+                uint64_t remainingCycles = zinfo->phaseLength * (wakeupPhase - zinfo->numPhases);
                 uint64_t remainingNsecs = remainingCycles*1000/zinfo->freqMHz;
                 rem->tv_sec = remainingNsecs/1000000000;
                 rem->tv_nsec = remainingNsecs % 1000000000;
@@ -307,3 +316,120 @@ uint64_t VirtGetPhaseRDTSC() {
     return zinfo->clockDomainInfo[domain].rdtscOffset + zinfo->globPhaseCycles;
 }
 
+// SYS_alarm
+
+PostPatchFn PatchAlarmSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_alarm);
+    trace(TimeVirt, "Patching SYS_alarm");
+    unsigned int secs = (unsigned int) PIN_GetSyscallArgument(ctxt, std, 0);
+    unsigned int secsRemain = zinfo->sched->intervalTimer.setAlarm(getpid(), secs);
+
+    //Turn this into a NOP by setting the argument to 0 (clears old timers)
+    PIN_SetSyscallArgument(ctxt, std, 0, 0);
+
+    //Postpatch to restore the arg and set the return value
+    return [secs, secsRemain](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Restore pre-call argument
+        PIN_SetSyscallArgument(ctxt, std, 0, secs);
+
+        //Set the return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = secsRemain;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_getitimer
+
+PostPatchFn PatchGetitimerSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_getitimer);
+    trace(TimeVirt, "Pre-patching SYS_getitimer");
+
+    // Save which timer is being requested
+    int which = (int)PIN_GetSyscallArgument(ctxt, std, 0);
+
+    return [which](PostPatchArgs args) {
+        trace(TimeVirt, "Post-patching SYS_getitimer");
+        struct itimerval val;
+        int res = zinfo->sched->intervalTimer.getIntervalTimer(getpid(), which, &val);
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        // Fill the timer information
+        ADDRINT arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+        PIN_SafeCopy((void *)arg1, &val, sizeof(struct itimerval));
+
+        // Set the return value
+        PIN_REGISTER reg;
+        reg.dword[0] = res;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_setitimer
+
+PostPatchFn PatchSetitimerSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_setitimer);
+    trace(TimeVirt, "Patching SYS_setitimer");
+
+    //Grab new and old itimerval args
+    ADDRINT arg0 = PIN_GetSyscallArgument(ctxt, std, 0);
+    ADDRINT arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+    struct itimerval* newVal = new struct itimerval();
+    PIN_SafeCopy(newVal, (void *)arg1, sizeof(struct itimerval));
+    struct itimerval* oldVal = new struct itimerval();
+    int res = zinfo->sched->intervalTimer.setIntervalTimer(getpid(), (int)arg0, newVal, oldVal);
+
+    //Turn this into a NOP by disabling the timer
+    memset(newVal, 0, sizeof(struct itimerval));
+    PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)newVal);
+
+    //Postpatch to set newVal, oldVal and the return value
+    return [arg1, newVal, oldVal, res](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Reset newVal
+        PIN_SetSyscallArgument(ctxt, std, 1, arg1);
+
+        //Set oldVal and free memory
+        ADDRINT arg2 = PIN_GetSyscallArgument(ctxt, std, 2);
+        if (arg2 != 0) {
+            PIN_SafeCopy((void *)arg2, oldVal, sizeof(struct itimerval));
+        }
+        delete newVal;
+        delete oldVal;
+
+        //Set return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = res;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
