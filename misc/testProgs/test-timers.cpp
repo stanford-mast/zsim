@@ -141,6 +141,36 @@ static void Setitimer(int which, const struct itimerval *new_value, struct itime
     }
 }
 
+// Test nanosleep
+static void testNanosleep() {
+    diff_.clear();
+    struct timespec newval, oldval;
+    newval.tv_sec = 0;
+    newval.tv_nsec = 5000000;  // 0.5 seconds
+    int res = nanosleep(&newval, &oldval);
+    if (res != 0) {
+        FAIL("Nanosleep failed", "");
+    }
+    newval.tv_sec = 1;
+    begin_ = std::chrono::steady_clock::now();
+    alarm(1);
+    res = nanosleep(&newval, &oldval);
+    if (diff_.empty()) {
+        FAIL("Didn't see SIGALRM", "");
+    }
+    if (res != -1) {
+        FAIL("Expected nanosleep to fail", "");
+    }
+    if (notClose(diff_.front(), 1.0)) {
+        FAIL("Expected 1 second (got %f)", diff_.front());
+    }
+    double remain = oldval.tv_sec;
+    remain += 1e-9 * oldval.tv_nsec;
+    if (notClose(remain, 0.5)) {
+        FAIL("Expected remaining time of 0.5 seconds (got %f)", remain);
+    }
+}
+
 // Test a single alarm() call with spinning instead of sleeping
 static void testAlarmSimple() {
     diff_.clear();
@@ -160,7 +190,7 @@ static void testAlarmSimple() {
         FAIL("Expected to see 1 signal (saw %lu)", diff_.size());
     }
     if (notClose(diff_.front(), 1.0)) {
-        FAIL("Expected 1 second (got %f)", diff_);
+        FAIL("Expected 1 second (got %f)", diff_.front());
     }
     alarm(0);
 }
@@ -178,13 +208,16 @@ static void testAlarm() {
     if (notClose(prior, 10)) {
         FAIL("Expected 10 seconds (got %u)", prior);
     }
-    sleep(2);
+    struct timespec amt;
+    amt.tv_sec = 2;
+    amt.tv_nsec = 0;
+    nanosleep(&amt, nullptr);   // Sleep 2 seconds
     if (diff_.empty()) {
         FAIL("Didn't see SIGALRM", "");
     }
     checkOneSignal();
     if (notClose(diff_.front(), 1.0)) {
-        FAIL("Expected 1 second (got %f)", diff_);
+        FAIL("Expected 1 second (got %f)", diff_.front());
     }
     // Test 2: Busy work while waiting
     diff_.clear();
@@ -242,12 +275,15 @@ static void testSetReal() {
     val.it_interval.tv_usec = 0;
     val.it_value.tv_sec = 2;
     val.it_value.tv_usec = 0;
+    struct timespec nsleep;
+    nsleep.tv_sec = 3;
+    nsleep.tv_nsec = 0;
     Setitimer(ITIMER_REAL, &val, nullptr);
 
     for (int i = 0; i < 2; i++) {
         diff_.clear();
         begin_ = std::chrono::steady_clock::now();
-        sleep(3);
+        nanosleep(&nsleep, nullptr);   // Sleep 3 seconds
         if (diff_.empty()) {
             FAIL("Didn't see SIGALRM", "");
         }
@@ -280,7 +316,18 @@ static void testSetVirtualProf(int which) {
     // Test 1: One active thread (the busy thread)
     diff_.clear();
     begin_ = std::chrono::steady_clock::now();
-    sleep(4); // A reasonable system should have >= 2 signals
+
+    // Sleep for 4 seconds. A reasonable system should have >= 2 signals
+    struct timespec nsleep, rem;
+    nsleep.tv_sec = 4;
+    nsleep.tv_nsec = 0;
+    int res = nanosleep(&nsleep, &rem);
+    while (res != 0) {
+        //printf("   ns remain: %lu sec, %lu nsec\n", rem.tv_sec, rem.tv_nsec);
+        nsleep = rem;
+        res = nanosleep(&nsleep, &rem);
+    }
+
     Setitimer(which, &zero, nullptr);
     if (diff_.empty()) {
         FAIL("Didn't see SIGVTALRM/SIGPROF", "");
@@ -324,6 +371,8 @@ int main() {
     Signal(SIGVTALRM, handler);
     Signal(SIGPROF, handler);
     std::thread worker(busyWork, 0);  // Run a continuous busy thread
+    printf("Tests begin here\n");
+    testNanosleep();
     testAlarmSimple();
     testAlarm();
     testGetItimer();

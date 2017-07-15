@@ -729,7 +729,7 @@ struct VdsoPatchSingleton {
 // Without such a mechanism it would be incorrect to call vDSO functions within a signal handler if the prior context were already processing a vDSO
 class VdsoPatchStack {
     private:
-        std::vector<VdsoPatchSingleton> patchStack[MAX_THREADS];
+        std::vector<VdsoPatchSingleton> patchStack[MAX_THREADS];  // XXX TODO: g_vector should be used but isn't initialized yet
 
     public:
         VdsoPatchStack() {
@@ -867,7 +867,51 @@ VOID VdsoInstrument(INS ins) {
 
 
 bool activeThreads[MAX_THREADS];  // set in ThreadStart, reset in ThreadFini, we need this for exec() (see FollowChild)
-bool inSyscall[MAX_THREADS];  // set in SyscallEnter, reset in SyscallExit, regardless of state. We MAY need this for ContextChange
+struct SyscallInfo {
+    long number;          //System call number requested by the application
+    long actual;          //Actual system call used (e.g., modified by zsim)
+    uint64_t wakeupPhase; //Corner case: The saved wakeup phase of an interrupted sleep->futex call. Used for restarting
+    bool inSyscall;       //Whether or not this thread is inside a syscall
+    bool interrupted;     //Whether or not this system call was interrupted by a signal
+
+    SyscallInfo() : number(0), actual(0), wakeupPhase(0), inSyscall(false), interrupted(false) {};
+    SyscallInfo(long _number, long _actual, uint64_t _wakeupPhase, bool _inSyscall, bool _interrupted)
+      : number(_number), actual(_actual), wakeupPhase(_wakeupPhase), inSyscall(_inSyscall), interrupted(_interrupted) {};
+};
+//We need a stack because of signal handlers: E.g., a file open could be interrupted by a printf in a handler.
+//System call information is updated at context switch boundaries (SyscallEnter, SyscallExit, and ContextChange).
+class SyscallStack {
+    private:
+        std::vector<SyscallInfo> syscallStack[MAX_THREADS]; // XXX TODO: g_vector should be used but isn't initialized yet
+
+    public:
+        // Each thread starts with one syscall state.
+        // This is never popped for performance reasons
+        SyscallStack() {
+            info("Start stack");
+            for (uint32_t i = 0; i < MAX_THREADS; i++) {
+                info("  .");
+                syscallStack[i].emplace_back(0, 0, 0, false, false);
+            }
+            info("End stack");
+        };
+        SyscallInfo &peek(THREADID tid) {
+            assert(syscallStack[tid].size() > 0);
+            return syscallStack[tid].back();
+        };
+        void push(THREADID tid, long number, long actual, uint64_t wakeupPhase, bool inSyscall, bool interrupted) {
+            syscallStack[tid].emplace_back(number, actual, wakeupPhase, inSyscall, interrupted);
+        };
+        void pop(THREADID tid) {
+            assert(syscallStack[tid].size() > 0);
+            syscallStack[tid].pop_back();
+        };
+        uint64_t size(THREADID tid) {
+            return (uint64_t)syscallStack[tid].size();
+        };
+};
+SyscallStack syscallStack;
+
 
 uint32_t CountActiveThreads() {
     // Finish all threads in this process w.r.t. the global scheduler
@@ -950,16 +994,80 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 flags, VOID *v) {
 
 //Need to remove ourselves from running threads in case the syscall is blocking
 VOID SyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
+    long number = (long) PIN_GetSyscallNumber(ctxt, std); //Note: Already called in VirtSyscallEnter()
+    trace(TimeVirt, "[%u] Start syscall %ld", tid, number);
+
+    //At the end of a signal handler, SYS_rt_sigreturn is called by libc to invoke kernel cleanup routines.
+    //This system call never returns, and we should not need to patch it. Instead, we completely ignore it.
+    if (number == SYS_rt_sigreturn) {
+        trace(TimeVirt, "[%u] Ignoring SYS_rt_sigreturn (inSyscall: %d)", tid, syscallStack.peek(tid).inSyscall);
+        return; // XXX May still need to call syscallLeave in case this runs over a phase boundary...
+    }
+
+    bool skipPatch = false;
+
+    //Some system calls are interrupted (e.g., by signals), and some are not. Some are restarted,
+    //and some are not. Interruptions are straightforward because Pin will see the syscall exit
+    //before the signal context switch. For non-interrupting signals, we need to consider what
+    //happens when the syscall either restarts or does not restart.
+
+    //The only reason we should enter a system call when already in a system call is due to an
+    //automatic kernel restart after a signal (see man pages for restart_syscall, futex, etc.).
+    SyscallInfo &scInfo = syscallStack.peek(tid);
+    if (scInfo.inSyscall) {
+        //This should only occur for a post-signal kernel restart or if we're in a new signal handler
+        assert(scInfo.interrupted);  //We could probably infer this from signalStackDepth...
+        bool newHandler = (syscallStack.size(tid) - 1) == signalStackDepth[tid];
+        if (newHandler) {
+            syscallStack.push(tid, number, number, 0, true, false);
+        } else {
+            //An automatic syscall restart from the kernel (i.e., NOT a new handler)
+            assert(number == scInfo.actual);  //Doesn't make sense to restart a different syscall...
+            if (scInfo.number == SYS_nanosleep) {
+                if (scInfo.actual == SYS_futex) {
+                    //Some signals interrupt nanosleep (returning EINTR) while others don't. We are here
+                    //because the kernel is restarting SYS_futex (virtualized nanosleep), so we have
+                    //two options: 1) Continue sleeping until the original timeout, or 2) Interrupt
+                    //nanosleep, returning EINTR. Normally, both options are possible and depend on
+                    //the signal that was delivered. We could distinguish this, but to be simple just
+                    //assume all signals cause nanosleep to be interrupted. As long as the application
+                    //is checking the result of nanosleep properly, this will be fine. Because the
+                    //actual syscall is SYS_futex, the simplest thing to do is to have it end at the next
+                    //phase. The postpatch will detect the sleep ended early and send EINTR with the
+                    //remaining time.
+                    trace(TimeVirt, "nanosleep->futex restart virtualization: Skipping updating the patch functions");
+                    skipPatch = true;
+                    zinfo->sched->markForSleep(procIdx, tid, zinfo->numPhases + 1);
+                } else {
+                    //This may not be an error, but we haven't considered it yet
+                    warn("[%d] Unexpected/unhandled restart syscall %ld for nanosleep", tid, scInfo.actual);
+                }
+            } else {
+                //This may be fine too, but we haven't considered non-nanosleep restarts
+                warn("[%d] Unexpected/unhandled restart syscall %ld for syscall %ld", tid, scInfo.actual, scInfo.number);
+            }
+        }
+    } else {
+        //A new, zero-depth system call
+        assert(syscallStack.size(tid) == 1);
+        //Push a new syscall table. 'interrupted' and 'wakeupPhase' are filled by ContextChange when needed
+        syscallStack.push(tid, number, number, 0, true, false);
+
+    }
+
     bool isNopThread = fPtrs[tid].type == FPTR_NOP;
     bool isRetryThread = fPtrs[tid].type == FPTR_RETRY;
 
-    if (!isRetryThread) {
-        VirtSyscallEnter(tid, ctxt, std, procTreeNode->getPatchRoot(), isNopThread);
+    if (isRetryThread) {
+        return;
+    } else {
+        if (!skipPatch) {
+            VirtSyscallEnter(tid, ctxt, std, procTreeNode->getPatchRoot(), &syscallStack.peek(tid).actual, isNopThread);
+        }
+        if (isNopThread) {
+            return;
+        }
     }
-
-    assert(!inSyscall[tid]); inSyscall[tid] = true;
-
-    if (isNopThread || isRetryThread) return;
 
     /* NOTE: It is possible that we take 2 syscalls back to back with any
      * intervening instrumentation, so we need to check. In that case, this is
@@ -981,7 +1089,11 @@ VOID SyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
 }
 
 VOID SyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
-    assert(inSyscall[tid]); inSyscall[tid] = false;
+    SyscallInfo &scInfo = syscallStack.peek(tid);
+    trace(TimeVirt, "[%u] Exit syscall %ld (actual: %ld, depth: %lu)", tid, scInfo.number, scInfo.actual, syscallStack.size(tid));
+    assert(scInfo.inSyscall);
+    assert(syscallStack.size(tid) > 1);
+    syscallStack.pop(tid);
 
     PostPatchAction ppa = VirtSyscallExit(tid, ctxt, std);
     if (ppa == PPA_USE_JOIN_PTRS) {
@@ -1005,7 +1117,6 @@ VOID SyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
         fPtrs[tid] = GetFFPtrs();
     }
 
-
     if (zinfo->terminationConditionMet) {
         info("Caught termination condition on syscall exit, exiting");
         SimEnd();
@@ -1015,9 +1126,14 @@ VOID SyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
 /* NOTE: We may screw up programs with frequent signals / SIG on syscall. If
  * you see this warning and simulations misbehave, it's time to do some testing
  * to figure out how to make syscall post-patching work in this case.
+ *
+ * NOTE: In-progress system calls will either be aborted before this callback
+ * (via SyscallExit), restarted by the kernel after the signal handler
+ * (via SyscallEnter), or may also continue without either interruption or restarting.
  */
 VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* from, CONTEXT* to, INT32 info, VOID* v) {
     const char* reasonStr = "?";
+    SyscallInfo &scInfo = syscallStack.peek(tid);
     switch (reason) {
         case CONTEXT_CHANGE_REASON_FATALSIGNAL:
             reasonStr = "FATAL_SIGNAL";
@@ -1025,6 +1141,24 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
         case CONTEXT_CHANGE_REASON_SIGNAL:
             reasonStr = "SIGNAL";
             signalStackDepth[tid]++;
+            if (scInfo.inSyscall) {
+                scInfo.interrupted = true;
+                if (scInfo.actual == SYS_futex) {
+                    if (zinfo->sched->isSleeping(procIdx, tid)) {
+                        //A zsim-invoked sleep has been interrupted by a signal. Remove the thread from the
+                        //sleep queue and retain its original wakeup phase. If the futex is restarted by
+                        //the kernel, use the wakeup phase to enqueue the futex wake again.
+                        //
+                        //Note: If the futex fails (i.e., does not restart), the application will get a patched
+                        //nanosleep result indicating how much time was left.
+                        scInfo.wakeupPhase = zinfo->sched->notifySleepEnd(procIdx, tid);
+                    }
+                } else {
+                    //TODO: Think about what an interrupted/restarted syscall means for non-SYS_futex.
+                    //This could be totally fine, but until then print a warning.
+                    warn("[%u] Interrupted potentially problematic syscall %ld", tid, scInfo.number);
+                }
+            }
             break;
         case CONTEXT_CHANGE_REASON_SIGRETURN:
             reasonStr = "SIGRETURN";
@@ -1042,19 +1176,13 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
             break;
     }
 
-    warn("[%d] ContextChange, reason %s (%d), inSyscall %d, sigLevel: %d", tid, reasonStr, info, inSyscall[tid], vdsoPatchData.peek(tid).level);
-    if (inSyscall[tid]) {
-        SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr);
-    }
+    info("[%d] ContextChange, reason %s (%d), inSyscall %d, sigLevel: %d", tid, reasonStr, info, scInfo.inSyscall, vdsoPatchData.peek(tid).level);
 
     if (reason == CONTEXT_CHANGE_REASON_FATALSIGNAL) {
         info("[%d] Fatal signal caught, finishing", tid);
         zinfo->sched->queueProcessCleanup(procIdx, getpid()); //the scheduler watchdog will remove all our state when we are really dead
         SimEnd();
     }
-
-    //If this is an issue, we might need to call syscallexit on occasion. I very much doubt it
-    //SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr); //NOTE: For now it is safe to do spurious syscall exits, but careful...
 }
 
 /* Fork and exec instrumentation */
@@ -1130,7 +1258,10 @@ VOID AfterForkInChild(THREADID tid, const CONTEXT* ctxt, VOID * arg) {
         fPtrs[i] = joinPtrs;
         cids[i] = UNINITIALIZED_CID;
         activeThreads[i] = false;
-        inSyscall[i] = false;
+        for (uint64_t j = 0; j < syscallStack.size(tid) - 1; j++) {
+            syscallStack.pop(tid);
+        }
+        syscallStack.peek(tid).inSyscall = false;
         cores[i] = nullptr;
     }
 

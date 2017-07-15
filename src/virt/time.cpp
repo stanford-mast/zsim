@@ -217,6 +217,8 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
     struct timespec* rem = (struct timespec*) PIN_GetSyscallArgument(ctxt, std, isClock? 3 : 1);
 
     // Turn this into a non-timed FUTEX_WAIT syscall
+    trace(TimeVirt, "[%d] Changing actual syscall to SYS_futex (%d)", args.tid, SYS_futex);
+    *(args.actualSyscall) = SYS_futex;
     PIN_SetSyscallNumber(ctxt, std, SYS_futex);
     PIN_SetSyscallArgument(ctxt, std, 0, (ADDRINT)futexWord);
     PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)FUTEX_WAIT);
@@ -233,8 +235,15 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
             trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
         }
 
+        //TODO: Doesn't clock_nanosleep directly return the (positive) errno?
         int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
-        if (res == EWOULDBLOCK) {
+        if (wakeupPhase > zinfo->numPhases) {
+            // Assume this is due to a signal interruption (rather than zsim bug)
+            trace(TimeVirt, "Sleep woke up early (%lu phases); assuming a signal and setting EINTR",
+                wakeupPhase - zinfo->numPhases);
+            res = EINTR;
+            PIN_SetSyscallNumber(ctxt, std, -EINTR);
+        } else if (res == EWOULDBLOCK) {
             trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
             PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
         } else if (res == EINTR) {
@@ -254,7 +263,7 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
         if (rem) {
             if (res == EINTR) {
                 assert(wakeupPhase >= zinfo->numPhases);  // o/w why is this EINTR...
-                uint64_t remainingCycles = wakeupPhase - zinfo->numPhases;
+                uint64_t remainingCycles = zinfo->phaseLength * (wakeupPhase - zinfo->numPhases);
                 uint64_t remainingNsecs = remainingCycles*1000/zinfo->freqMHz;
                 rem->tv_sec = remainingNsecs/1000000000;
                 rem->tv_nsec = remainingNsecs % 1000000000;
@@ -380,7 +389,9 @@ PostPatchFn PatchSetitimerSyscall(PrePatchArgs args) {
 
         //Set oldVal and free memory
         ADDRINT arg2 = PIN_GetSyscallArgument(ctxt, std, 2);
-        PIN_SafeCopy((void *)arg2, oldVal, sizeof(struct itimerval));
+        if (arg2 != 0) {
+            PIN_SafeCopy((void *)arg2, oldVal, sizeof(struct itimerval));
+        }
         delete newVal;
         delete oldVal;
 

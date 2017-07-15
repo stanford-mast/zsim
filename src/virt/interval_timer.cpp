@@ -82,8 +82,6 @@ void IntervalTimer::phaseTick() {
             assert(si->phase == curPhase);
             trace(Sched, "Sending delayed signal %d to pid %d at phase %lu", si->sig, si->osPid, curPhase);
 
-            //XXX TODO: May need to unblock sleeping threads first
-
             //Note that SYS_tgkill could be used instead to target a specific thread
             syscall(SYS_kill, si->osPid, si->sig);  // XXX errno is not thread-safe for pin tools. Check
 

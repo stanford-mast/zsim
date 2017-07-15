@@ -169,8 +169,8 @@ class Scheduler : public GlobAlloc, public Callee {
         inline uint32_t getTid(uint32_t gid) const {return gid & 0x0FFFF;}
 
     public:
-        Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum) :
-            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer((uint32_t)zinfo->lineSize)
+        Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum, uint32_t _maxProcesses) :
+            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer(_maxProcesses)
         {
             contexts.resize(numCores);
             for (uint32_t i = 0; i < numCores; i++) {
@@ -486,7 +486,8 @@ class Scheduler : public GlobAlloc, public Callee {
             return res;
         }
 
-        void notifySleepEnd(uint32_t pid, uint32_t tid) {
+        uint64_t notifySleepEnd(uint32_t pid, uint32_t tid) {
+            uint64_t wakeupPhase;
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
             ThreadInfo* th = gidMap[gid];
@@ -499,7 +500,9 @@ class Scheduler : public GlobAlloc, public Callee {
                 sleepQueue.remove(th);
                 th->state = BLOCKED;
             }
+            wakeupPhase = th->wakeupPhase;
             futex_unlock(&schedLock);
+            return wakeupPhase;
         }
 
         void printThreadState(uint32_t pid, uint32_t tid) {

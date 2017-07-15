@@ -937,6 +937,11 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
 
     zinfo->eventQueue = new EventQueue(); //must be instantiated before the memory hierarchy
 
+    //Process tree needs this initialized, even though it is part of the memory hierarchy
+    //The scheduler also needs the max number of processes which we derive from here (e.g., see process_tree.cpp)
+    zinfo->lineSize = config.get<uint32_t>("sys.lineSize", 64);
+    assert(zinfo->lineSize > 0);
+
     if (!zinfo->traceDriven) {
         //Build the scheduler
         uint32_t parallelism = config.get<uint32_t>("sim.parallelism", 2*sysconf(_SC_NPROCESSORS_ONLN));
@@ -944,7 +949,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         assert(parallelism > 0); //jeez...
 
         uint32_t schedQuantum = config.get<uint32_t>("sim.schedQuantum", 10000); //phases
-        zinfo->sched = new Scheduler(EndOfPhaseActions, parallelism, zinfo->numCores, schedQuantum);
+        zinfo->sched = new Scheduler(EndOfPhaseActions, parallelism, zinfo->numCores, schedQuantum, zinfo->lineSize);
     } else {
         zinfo->sched = nullptr;
     }
@@ -961,10 +966,6 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     AggregateStat* allCoreStats = new AggregateStat(false);
     allCoreStats->init("core", "Core stats");
     zinfo->rootStat->append(allCoreStats);
-
-    //Process tree needs this initialized, even though it is part of the memory hierarchy
-    zinfo->lineSize = config.get<uint32_t>("sys.lineSize", 64);
-    assert(zinfo->lineSize > 0);
 
     //Port virtualization
     for (uint32_t i = 0; i < MAX_PORT_DOMAINS; i++) zinfo->portVirt[i] = new PortVirtualizer();

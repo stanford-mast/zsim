@@ -38,7 +38,7 @@ enum PostPatchAction {
 };
 
 void VirtInit();  // per-process, not global
-void VirtSyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, const char* patchRoot, bool isNopThread);
+void VirtSyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, const char* patchRoot, long *actualSyscall, bool isNopThread);
 PostPatchAction VirtSyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std);
 
 // VDSO / external virt functions
