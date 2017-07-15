@@ -69,7 +69,7 @@ static bool notClose(double measured, double expected, double percent = 1.0) {
     if (expected < 0) {
       FAIL("Saw negative expected time: %f", expected);
     }
-    double delta = percent * expected;
+    double delta = 0.01 * percent * expected;
     if (delta < 0.000001) {
       // Handle expected == 0
       printf("Got small val: %f\n", delta);
@@ -86,36 +86,50 @@ static bool notClose(double measured, double expected, double percent = 1.0) {
 // (The actual algorithm is 'xor shift 128', a quick 32-bit PRNG)
 // Run for 'rounds' iterations, or until 'shutdown_' if rounds is 0
 void busyWork(uint32_t rounds) {
-  uint32_t a, b, c, d;
-  a = 0xdeafbeef;
-  b = 0xc001cafe;
-  c = 0x01234567;
-  d = 0x89abcdef;
-  bool forever = (rounds == 0);
-  while (!shutdown_ && (forever || (rounds > 0))) {
-      for (uint32_t i = 0; i < 1000000; i++) {
-          uint32_t x = d;
-          x ^= x << 11;
-          x ^= x >> 8;
-          d = c;
-          c = b;
-          b = a;
-          x ^= a;
-          x ^= a >> 19;
-          a = x;
-      }
-      rounds--;
-  }
+    uint32_t a, b, c, d;
+    a = 0xdeafbeef;
+    b = 0xc001cafe;
+    c = 0x01234567;
+    d = 0x89abcdef;
+    bool forever = (rounds == 0);
+    while (!shutdown_ && (forever || (rounds > 0))) {
+        for (uint32_t i = 0; i < 1000000; i++) {
+            uint32_t x = d;
+            x ^= x << 11;
+            x ^= x >> 8;
+            d = c;
+            c = b;
+            b = a;
+            x ^= a;
+            x ^= a >> 19;
+            a = x;
+        }
+        rounds--;
+    }
+}
+
+void threadStart() {
+    // First block signals on this thread for simplicity
+    sigset_t set;
+    if (sigfillset(&set) != 0) {
+        FAIL("sigfillset error", "");
+    }
+    if (pthread_sigmask(SIG_BLOCK, &set, nullptr) != 0) {
+        FAIL("pthread_sigmask error", "");
+    }
+
+    // Run busy work until terminated
+    busyWork(0);
 }
 
 // Estimate the number of busy work rounds in 1 real second
 void benchmarkBusyWork() {
-  begin_ = std::chrono::steady_clock::now();
-  busyWork(200);
-  end_ = std::chrono::steady_clock::now();
-  double diff = std::chrono::duration<double>(end_ - begin_).count();
-  double rounds = 200.0 / diff;
-  ROUNDS_1SEC = static_cast<uint32_t>(rounds);
+    begin_ = std::chrono::steady_clock::now();
+    busyWork(200);
+    end_ = std::chrono::steady_clock::now();
+    double diff = std::chrono::duration<double>(end_ - begin_).count();
+    double rounds = 200.0 / diff;
+    ROUNDS_1SEC = static_cast<uint32_t>(rounds);
 }
 
 // Primary signal handler
@@ -146,7 +160,7 @@ static void testNanosleep() {
     diff_.clear();
     struct timespec newval, oldval;
     newval.tv_sec = 0;
-    newval.tv_nsec = 5000000;  // 0.5 seconds
+    newval.tv_nsec = 500000000;  // 0.5 seconds
     int res = nanosleep(&newval, &oldval);
     if (res != 0) {
         FAIL("Nanosleep failed", "");
@@ -246,6 +260,7 @@ static void testGetItimer() {
     memset(&zero, 0, sizeof(zero));
     int which = ITIMER_REAL;
 
+    // Test reading old values from setitimer
     for (int i = 0; i < 3; i++) {
         diff_.clear();
         if (i == 1) {
@@ -265,6 +280,31 @@ static void testGetItimer() {
         if (notClose(remain, 3.0)) {
             FAIL("Expected 3 seconds (got %f)", remain);
         }
+    }
+    // Test getitimer
+    val.it_interval.tv_usec = 500000;
+    val.it_value.tv_usec = 400000;
+    which = ITIMER_REAL;
+    for (int i = 0; i < 3; i++) {
+        if (i == 1) {
+            which = ITIMER_VIRTUAL;
+        } else if (i == 2) {
+            which = ITIMER_PROF;
+        }
+        memset(&old, 0, sizeof(old));
+        Setitimer(which, &val, nullptr);
+        if (getitimer(which, &old) != 0) {
+            FAIL("getitimer failed", "");
+        }
+        double remain = (double)old.it_value.tv_sec + (1e-6 * old.it_value.tv_usec);
+        if (notClose(remain, 3.4)) {
+            FAIL("Expected 3.4 seconds (got %f)", remain);
+        }
+        remain = (double)old.it_interval.tv_sec + (1e-6 * old.it_interval.tv_usec);
+        if (notClose(remain, 5.5)) {
+            FAIL("Expected 5.5 seconds (got %f)", remain);
+        }
+        Setitimer(which, &zero, nullptr);
     }
 }
 
@@ -303,7 +343,7 @@ static void testSetReal() {
 //
 // TODO: These tests may fail on a busy system since Virt/Prof time may be greater than wall time.
 // The call to 'notClose()' should be replaced with something that is more relaxed, and checks
-// e.g., >= expected wall time. Meanwhile we set a tolerance of 5% (instead of the default 1%).
+// e.g., >= expected wall time. Meanwhile we set a tolerance of 10% (instead of the default 1%).
 static void testSetVirtualProf(int which) {
     struct itimerval val, zero;
     val.it_interval.tv_sec = 1;
@@ -323,7 +363,7 @@ static void testSetVirtualProf(int which) {
     nsleep.tv_nsec = 0;
     int res = nanosleep(&nsleep, &rem);
     while (res != 0) {
-        //printf("   ns remain: %lu sec, %lu nsec\n", rem.tv_sec, rem.tv_nsec);
+        printf("   ns remain: %lu sec, %lu nsec\n", rem.tv_sec, rem.tv_nsec);
         nsleep = rem;
         res = nanosleep(&nsleep, &rem);
     }
@@ -337,7 +377,7 @@ static void testSetVirtualProf(int which) {
     }
     double last = 0.0;
     for (double val : diff_) {
-        if (notClose(val - last, 1.0, 5.0)) {
+        if (notClose(val - last, 1.0, 10.0)) {
             FAIL("Expected 1 second (got %f)", val - last);
         }
         last = val;
@@ -357,7 +397,7 @@ static void testSetVirtualProf(int which) {
     }
     last = 0.0;
     for (double val : diff_) {
-        if (notClose(val - last, 0.5, 5.0)) {
+        if (notClose(val - last, 0.5, 10.0)) {
             FAIL("Expected 0.5 seconds (got %f)", val - last);
         }
         last = val;
@@ -370,7 +410,7 @@ int main() {
     Signal(SIGALRM, handler);
     Signal(SIGVTALRM, handler);
     Signal(SIGPROF, handler);
-    std::thread worker(busyWork, 0);  // Run a continuous busy thread
+    std::thread worker(threadStart);  // Run a continuous busy thread
     printf("Tests begin here\n");
     testNanosleep();
     testAlarmSimple();

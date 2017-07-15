@@ -353,7 +353,36 @@ PostPatchFn PatchAlarmSyscall(PrePatchArgs args) {
 // SYS_getitimer
 
 PostPatchFn PatchGetitimerSyscall(PrePatchArgs args) {
-    return NullPostPatch;
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_getitimer);
+    trace(TimeVirt, "Pre-patching SYS_getitimer");
+
+    // Save which timer is being requested
+    int which = (int)PIN_GetSyscallArgument(ctxt, std, 0);
+
+    return [which](PostPatchArgs args) {
+        trace(TimeVirt, "Post-patching SYS_getitimer");
+        struct itimerval val;
+        int res = zinfo->sched->intervalTimer.getIntervalTimer(getpid(), which, &val);
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        // Fill the timer information
+        ADDRINT arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+        PIN_SafeCopy((void *)arg1, &val, sizeof(struct itimerval));
+
+        // Set the return value
+        PIN_REGISTER reg;
+        reg.dword[0] = res;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
 }
 
 // SYS_setitimer

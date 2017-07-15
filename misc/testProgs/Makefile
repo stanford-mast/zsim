@@ -5,7 +5,7 @@ DEPS=Makefile
 default: test-timers
 
 test-timers: $(DEPS) test-timers.cpp
-	g++ -Wall -Wextra -pedantic -std=c++11 -pthread test-timers.cpp -o $@
+	g++ -Wall -Wextra -pedantic -std=c++11 -pthread -g test-timers.cpp -o $@
 
 .PHONY: run-tests
 run-tests: default
