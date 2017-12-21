@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -65,6 +66,20 @@ class SHA1HashFamily : public HashFamily {
 class IdHashFamily : public HashFamily {
     public:
         inline uint64_t hash(uint32_t id, uint64_t val) {return val;}
+};
+
+class CacheBankHash {
+public:
+    static inline uint64_t hash(uint64_t val, uint64_t outputRange) {
+        //Hash things a bit
+        uint64_t res = 0;
+        uint64_t tmp = val;
+        for (uint32_t i = 0; i < 4; i++) {
+            res ^= (uint32_t) ( ((uint64_t)0xffff) & tmp);
+            tmp = tmp >> 16;
+        }
+        return (res % outputRange);
+    }
 };
 
 #endif  // HASH_H_

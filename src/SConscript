@@ -6,6 +6,52 @@ Import("env")
 commonSrcs = ["config.cpp", "galloc.cpp", "log.cpp", "pin_cmd.cpp"]
 harnessSrcs = ["zsim_harness.cpp", "debug_harness.cpp"]
 
+traceSrcs = [
+    "access_tracing.cpp",
+    "cache.cpp",
+    "cache_arrays.cpp",
+    "cache_prefetcher.cpp",
+    "coherence_ctrls.cpp",
+    "contention_sim.cpp",
+    "core_recorder.cpp",
+    "ddr_mem.cpp",
+    "detailed_mem.cpp",
+    "detailed_mem_params.cpp",
+    "dramsim_mem_ctrl.cpp",
+    "ghb_prefetcher.cpp",
+    "hash.cpp",
+    "hdf5_stats.cpp",
+    "lookahead.cpp",
+    "mem_ctrls.cpp",
+    "memory_hierarchy.cpp",
+    "monitor.cpp",
+    "network.cpp",
+    "next_line_prefetcher.cpp",
+    "null_core.cpp",
+    "ooo_core.cpp",
+    "ooo_core_recorder.cpp",
+    "parse_vdso.cpp",
+    "partition_mapper.cpp",
+    "prefetcher.cpp",
+    "simple_core.cpp",
+    "stats_filter.cpp",
+    "table_prefetcher.cpp",
+    "text_stats.cpp",
+    "timing_cache.cpp",
+    "timing_core.cpp",
+    "timing_event.cpp",
+    "trace_decoder.cpp",
+    "trace_driver.cpp",
+    "trace_init.cpp",
+    "trace_zsim.cpp",
+    "tracing_cache.cpp",
+    "utility_monitor.cpp",
+]
+
+traceReaderSrcs = ["trace_reader.cpp"]
+
+
+
 # By default, we compile all cpp files in libzsim.so. List the cpp files that
 # should be excluded below (one per line and in order, to ease merges)
 excludeSrcs = [
@@ -27,27 +73,33 @@ syscallSrc = libEnv.Substfile("virt/syscall_name.cpp", "virt/syscall_name.cpp.in
         SUBST_DICT = {"SYSCALL_NAME_LIST" : getSyscalls()})
 
 # Build libzsim.so
-globSrcNodes = Glob("*.cpp") + Glob("virt/*.cpp")
-libSrcs = [str(x) for x in globSrcNodes if str(x) not in excludeSrcs]
-libSrcs += [str(x) for x in syscallSrc]
-libSrcs = list(set(libSrcs)) # ensure syscallSrc is not duplicated
-libEnv.SharedLibrary("zsim.so", libSrcs)
+#globSrcNodes = Glob("*.cpp") + Glob("virt/*.cpp")
+#libSrcs = [str(x) for x in globSrcNodes if str(x) not in excludeSrcs]
+#libSrcs += [str(x) for x in syscallSrc]
+#libSrcs = list(set(libSrcs)) # ensure syscallSrc is not duplicated
+#libEnv.SharedLibrary("zsim.so", libSrcs)
 
 # Build tracing utilities (need hdf5 & dynamic linking)
-traceEnv = env.Clone()
-if "hdf5" in traceEnv["PINLIBS"]:
-    traceEnv["LIBS"] += ["hdf5", "hdf5_hl"]
-else:
-    assert "hdf5_serial" in traceEnv["PINLIBS"]
-    traceEnv["LIBS"] += ["hdf5_serial", "hdf5_serial_hl"]
-traceEnv["OBJSUFFIX"] += "t"
-traceEnv.Program("dumptrace", ["dumptrace.cpp", "access_tracing.cpp", "memory_hierarchy.cpp"] + commonSrcs)
-traceEnv.Program("sorttrace", ["sorttrace.cpp", "access_tracing.cpp"] + commonSrcs)
+#traceEnv = env.Clone()
+#traceEnv["LIBS"] += ["hdf5", "hdf5_hl"]
+#traceEnv["OBJSUFFIX"] += "t"
+#traceEnv.Program("dumptrace", ["dumptrace.cpp", "access_tracing.cpp", "memory_hierarchy.cpp"] + commonSrcs)
+#traceEnv.Program("sorttrace", ["sorttrace.cpp", "access_tracing.cpp"] + commonSrcs)
 
 # Build harness (static to make it easier to run across environments)
-env["LINKFLAGS"] += " --static "
-env["LIBS"] += ["pthread"]
-env.Program("zsim", harnessSrcs + commonSrcs)
+#env["LINKFLAGS"] += " --static "
+#env["LIBS"] += ["pthread"]
+#env.Program("zsim", harnessSrcs + commonSrcs)
+
+# Build zsim trace
+#env["LINKFLAGS"] += " --static "
+env["CPPFLAGS"] += " -std=c++11 -DTRACE_BASED=1"
+env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/xed/kits/xed-install-base-2017-12-18-lin-x86-64/lib/"]
+env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/clients/lib64/release/"]
+env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/ext/lib64/release/"]
+env["LIBS"] += ["pthread", "hdf5", "hdf5_hl", "z", "xed", "drmemtrace", "drmemtrace_analyzer"]
+env.Program("zsim_trace",  traceSrcs + commonSrcs + traceReaderSrcs)
+
 
 # Build additional utilities below
-env.Program("fftoggle", ["fftoggle.cpp"] + commonSrcs)
+#env.Program("fftoggle", ["fftoggle.cpp"] + commonSrcs)

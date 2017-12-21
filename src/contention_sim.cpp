@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -65,6 +66,7 @@ ContentionSim::ContentionSim(uint32_t _numDomains, uint32_t _numSimThreads) {
     limit = 0;
     lastLimit = 0;
     inCSim = false;
+    terminate = false;
 
     domains = gm_calloc<DomainData>(numDomains);
     simThreads = gm_calloc<SimThreadData>(numSimThreads);
@@ -415,4 +417,3 @@ void ContentionSim::finish() {
     terminate = true;
     __sync_synchronize();
 }
-

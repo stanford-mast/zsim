@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -25,6 +26,19 @@
 
 #ifndef VIRT_SYSCALL_NAME_H_
 #define VIRT_SYSCALL_NAME_H_
+
+/* TODO: Grab the defines below from Google3 */
+#define SYS_google_syscall_switchto 602
+#define SYS_google_syscall_get_gtid 603
+
+#define SYS_SWITCHTO_SET_FLAGS           -1
+#define SYS_SWITCHTO_SETID        0
+#define SYS_SWITCHTO_WAIT        1
+#define SYS_SWITCHTO_SWITCH        2
+#define SYS_SWITCHTO_RESUME        3
+#define SYS_SWITCHTO_SWITCH_CROSS_PROC  4
+#define SYS_SWITCHTO_RESUME_CROSS_PROC  5
+#define SYS_SWITCHTO_SWITCH_POLLED  6
 
 const char* GetSyscallName(uint32_t syscall);
 

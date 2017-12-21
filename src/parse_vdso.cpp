@@ -14,7 +14,8 @@
  * This code is tested on x86_64.  In principle it should work on any 64-bit
  * architecture that has a vDSO.
  */
-
+#include <iostream>
+#include <string>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -209,6 +210,7 @@ static bool vdso_match_version(Elf64_Versym ver,
 
 void *vdso_sym(const char *version, const char *name)
 {
+
   unsigned long ver_hash;
   if (!vdso_info.valid)
     return 0;
@@ -222,11 +224,14 @@ void *vdso_sym(const char *version, const char *name)
     /* Check for a defined global or weak function w/ right name. */
     if (ELF64_ST_TYPE(sym->st_info) != STT_FUNC)
       continue;
+
     if (ELF64_ST_BIND(sym->st_info) != STB_GLOBAL &&
         ELF64_ST_BIND(sym->st_info) != STB_WEAK)
       continue;
+
     if (sym->st_shndx == SHN_UNDEF)
       continue;
+
     if (strcmp(name, vdso_info.symstrings + sym->st_name))
       continue;
 
@@ -255,4 +260,3 @@ void vdso_init_from_auxv(void *auxv)
 
   vdso_info.valid = false;
 }
-

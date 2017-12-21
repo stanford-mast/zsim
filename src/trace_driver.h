@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -84,19 +85,28 @@ class TraceDriverProxyCache : public BaseCache {
         TraceDriver* drv;
         uint32_t id;
         g_string name;
+        g_vector<MemObject*> parents;
         MemObject* parent;
     public:
         TraceDriverProxyCache(g_string& _name) : drv(nullptr), id(-1), name(_name) {}
-        const char* getName() {return name.c_str();}
+        const char* getName() override {return name.c_str();}
 
-        void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network) {id = _childId; assert(parents.size() == 1); parent = parents[0];}; //FIXME: Support multi-banked caches...
-        void setChildren(const g_vector<BaseCache*>& children, Network* network) {panic("Should not be called, this must be terminal");};
+        void setParents(uint32_t _childId, const g_vector<MemObject*>& _parents, Network* _network) override {
+            id = _childId;
+            assert(_parents.size() == 1);
+            parents = _parents;
+            parent = parents[0];
+        }; //FIXME: Support multi-banked caches...
+
+        g_vector<MemObject*>* getParents() override {return &parents;};
+        void setChildren(const g_vector<BaseCache*>& children, Network* network) override {panic("Should not be called, this must be terminal");};
+        g_vector<BaseCache*>* getChildren() override {panic("Should not be called, this must be terminal"); return nullptr;};
 
         MemObject* getParent() const {return parent;}
         void setDriver(TraceDriver* driver) {drv = driver;}
 
-        uint64_t access(MemReq& req) {panic("Should never be called");}
-        uint64_t invalidate(const InvReq& req) {
+        uint64_t access(MemReq& req) override {panic("Should never be called");}
+        uint64_t invalidate(const InvReq& req) override {
             return drv->invalidate(id, req.lineAddr, req.type, req.writeback, req.cycle, req.srcId);
         }
 };

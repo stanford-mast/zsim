@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -36,7 +37,7 @@
 #include "pad.h"
 
 // Uncomment to enable stall stats
-// #define OOO_STALL_STATS
+#define OOO_STALL_STATS
 
 class FilterCache;
 
@@ -45,16 +46,22 @@ class FilterCache;
  *  - L2: Pattern history table (pht): 2^LB entries, 2-bit sat counters, indexed by XOR'd bshr contents
  *  NOTE: Assumes LB is in [NB, HB] range for XORing (e.g., HB = 18 and NB = 10, LB = 13 is OK)
  */
-template<uint32_t NB, uint32_t HB, uint32_t LB>
 class BranchPredictorPAg {
     private:
-        uint32_t bhsr[1 << NB];
-        uint8_t pht[1 << LB];
+        uint32_t NB;
+        uint32_t HB;
+        uint32_t LB;
+        uint32_t *bhsr;
+        uint8_t *pht;
 
     public:
-        BranchPredictorPAg() {
+        BranchPredictorPAg(uint32_t _NB, uint32_t _HB, uint32_t _LB) :
+          NB(_NB), HB(_HB), LB(_LB) {
             uint32_t numBhsrs = 1 << NB;
             uint32_t phtSize = 1 << LB;
+
+            bhsr = gm_calloc<uint32_t>(1 << NB);
+            pht = gm_calloc<uint8_t>(1 << LB);
 
             for (uint32_t i = 0; i < numBhsrs; i++) {
                 bhsr[i] = 0;
@@ -63,8 +70,12 @@ class BranchPredictorPAg {
                 pht[i] = 1;  // weak non-taken
             }
 
-            static_assert(LB <= HB, "Too many PHT entries");
-            static_assert(LB >= NB, "Too few PHT entries (you'll need more XOR'ing)");
+            if (LB > HB) {
+                panic("Too many PHT entries");
+            }
+            if (LB < NB) {
+                panic("Too few PHT entries (you'll need more XOR'ing)");
+            }
         }
 
         // Predicts and updates; returns false if mispredicted
@@ -194,13 +205,13 @@ class WindowStructure {
 
         // Poisons a range of cycles; used by the LSU to apply backpressure to the IW
         void poisonRange(uint64_t curCycle, uint64_t targetCycle, uint8_t portMask) {
-            uint64_t startCycle = curCycle;  // curCycle should not be modified...
+            uint64_t schedCurCycle = curCycle;  // curCycle should not be modified...
             uint64_t poisonCycle = curCycle;
             while (poisonCycle < targetCycle) {
-                scheduleInternal<false, false>(curCycle, poisonCycle, portMask);
+                scheduleInternal<false, false>(schedCurCycle, poisonCycle, portMask);
             }
             // info("Poisoned port mask %x from %ld to %ld (tgt %ld)", portMask, curCycle, poisonCycle, targetCycle);
-            assert(startCycle == curCycle);
+            assert(schedCurCycle == curCycle);
         }
 
     private:
@@ -239,13 +250,11 @@ class WindowStructure {
                     while (true) {
                         if (it == ubWin.end()) {
                             WinCycle wc = {0, 0};
-                            bool success = trySchedule<touchOccupancy, recordPort>(wc, portMask);
-                            assert(success);
+                            assert((trySchedule<touchOccupancy, recordPort>(wc, portMask)));
                             ubWin.insert(std::pair<uint64_t, WinCycle>(schedCycle, wc));
                         } else if (it->first != schedCycle) {
                             WinCycle wc = {0, 0};
-                            bool success = trySchedule<touchOccupancy, recordPort>(wc, portMask);
-                            assert(success);
+                            assert((trySchedule<touchOccupancy, recordPort>(wc, portMask)));
                             ubWin.insert(it /*hint, makes insert faster*/, std::pair<uint64_t, WinCycle>(schedCycle, wc));
                         } else {
                             if (!trySchedule<touchOccupancy, recordPort>(it->second, portMask)) {
@@ -371,8 +380,8 @@ class OOOCore : public Core {
         BblInfo* prevBbl;
 
         //Record load and store addresses
-        Address loadAddrs[256];
-        Address storeAddrs[256];
+        Address loadAddrs[2048];
+        Address storeAddrs[2048];
         uint32_t loads;
         uint32_t stores;
 
@@ -403,7 +412,7 @@ class OOOCore : public Core {
         // where a few of the 2-level history bits are in the tag.
         // Since this is close enough, we'll leave it as is for now. Feel free to reverse-engineer the real thing...
         // UPDATE: Now pht index is XOR-folded BSHR. This has 6656 bytes total -- not negligible, but not ridiculous.
-        BranchPredictorPAg<11, 18, 14> branchPred;
+        BranchPredictorPAg *branchPred;
 
         Address branchPc;  //0 if last bbl was not a conditional branch
         bool branchTaken;
@@ -414,9 +423,11 @@ class OOOCore : public Core {
         CycleQueue<28> uopQueue;  // models issue queue
 
         uint64_t instrs, uops, bbls, approxInstrs, mispredBranches;
+        Counter profCondBranches;
 
 #ifdef OOO_STALL_STATS
-        Counter profFetchStalls, profDecodeStalls, profIssueStalls;
+  Counter profFetchStalls, profDecodeStalls, profIssueStalls, profRFReadStalls,
+    profRobStalls, profRRStalls, profMispredStalls;
 #endif
 
         // Load-store forwarding
@@ -434,7 +445,8 @@ class OOOCore : public Core {
         OOOCoreRecorder cRec;
 
     public:
-        OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name);
+        OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name,
+                CoreProperties *properties);
 
         void initStats(AggregateStat* parentStat);
 
@@ -476,10 +488,10 @@ class OOOCore : public Core {
 
         inline void bbl(Address bblAddr, BblInfo* bblInfo);
 
-        static void LoadFunc(THREADID tid, ADDRINT addr);
-        static void StoreFunc(THREADID tid, ADDRINT addr);
-        static void PredLoadFunc(THREADID tid, ADDRINT addr, BOOL pred);
-        static void PredStoreFunc(THREADID tid, ADDRINT addr, BOOL pred);
+        static void LoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
+        static void StoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
+        static void PredLoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
+        static void PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
         static void BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo);
         static void BranchFunc(THREADID tid, ADDRINT pc, BOOL taken, ADDRINT takenNpc, ADDRINT notTakenNpc);
 } ATTR_LINE_ALIGNED;  // Take up an int number of cache lines

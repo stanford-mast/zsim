@@ -30,18 +30,56 @@
 /* Set-associative array implementation */
 
 SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf) : rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc)  {
-    array = gm_calloc<Address>(numLines);
+    array = gm_calloc<AddrCycle>(numLines);
     numSets = numLines/assoc;
     setMask = numSets - 1;
     assert_msg(isPow2(numSets), "must have a power of 2 # sets, but you specified %d", numSets);
 }
 
-int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+void SetAssocArray::initStats(AggregateStat* parentStat) {
+    AggregateStat* objStats = new AggregateStat();
+    objStats->init("array", "Cache array stats");
+    profPrefHit.init("prefHits", "Cache line hits that were previously prefetched");
+    objStats->append(&profPrefHit);
+    profPrefEarlyMiss.init("prefEarlyMiss", "Prefetched cache lines that were never used or fetched too early so they were already evicted from the cache");
+    objStats->append(&profPrefEarlyMiss);
+    profPrefLateMiss.init("prefLateMiss", "Prefetched cache lines that were fetched too late and were still in flight");
+    objStats->append(&profPrefLateMiss);
+    profPrefLateTotalCycles.init("prefTotalLateCyc", "Total cycles lost waiting on late prefetches");
+    objStats->append(&profPrefLateTotalCycles);
+    parentStat->append(objStats);
+}
+
+int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
     for (uint32_t id = first; id < first + assoc; id++) {
-        if (array[id] ==  lineAddr) {
+        if (array[id].addr == lineAddr) {
             if (updateReplacement) rp->update(id, req);
+            if (updateReplacement && array[id].prefetch && !(req->flags & MemReq::SPECULATIVE)) {
+                if (array[id].availCycle > req->cycle) {
+                    profPrefLateMiss.inc();
+                    profPrefLateTotalCycles.inc(array[id].availCycle - req->cycle);
+                }
+                else {
+                    profPrefHit.inc();
+                }
+                array[id].prefetch = false;
+            }
+            if (req == nullptr) {
+                return id;
+            }
+            //cache hit, line is in the cache
+            if (req->cycle > array[id].availCycle) {
+                *availCycle = req->cycle;
+            }
+            //line is in flight, compensate for potential OOO
+            else if (req->cycle < array[id].startCycle) {
+                *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
+            } else {
+                *availCycle = array[id].availCycle;
+            }
+
             return id;
         }
     }
@@ -54,13 +92,20 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
 
     uint32_t candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
 
-    *wbLineAddr = array[candidate];
+    *wbLineAddr = array[candidate].addr;
+
     return candidate;
 }
 
-void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate) {
+void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
     rp->replaced(candidate);
-    array[candidate] = lineAddr;
+    if(array[candidate].prefetch) {
+        profPrefEarlyMiss.inc();
+    }
+    array[candidate].prefetch = req->flags & MemReq::SPECULATIVE;
+    array[candidate].addr = lineAddr;
+    array[candidate].availCycle = respCycle;
+    array[candidate].startCycle = req->cycle;
     rp->update(candidate, req);
 }
 
@@ -80,7 +125,7 @@ ZArray::ZArray(uint32_t _numLines, uint32_t _ways, uint32_t _candidates, ReplPol
     setMask = numSets - 1;
 
     lookupArray = gm_calloc<uint32_t>(numLines);
-    array = gm_calloc<Address>(numLines);
+    array = gm_calloc<AddrCycle>(numLines);
     for (uint32_t i = 0; i < numLines; i++) {
         lookupArray[i] = i;  // start with a linear mapping; with swaps, it'll get progressively scrambled
     }
@@ -95,7 +140,7 @@ void ZArray::initStats(AggregateStat* parentStat) {
     parentStat->append(objStats);
 }
 
-int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
     /* Be defensive: If the line is 0, panic instead of asserting. Now this can
      * only happen on a segfault in the main program, but when we move to full
      * system, phy page 0 might be used, and this will hit us in a very subtle
@@ -105,10 +150,18 @@ int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateRep
 
     for (uint32_t w = 0; w < ways; w++) {
         uint32_t lineId = lookupArray[w*numSets + (hf->hash(w, lineAddr) & setMask)];
-        if (array[lineId] == lineAddr) {
+        if (array[lineId].addr == lineAddr) {
             if (updateReplacement) {
                 rp->update(lineId, req);
             }
+            if (req->cycle > array[lineId].availCycle) {
+                *availCycle = req->cycle;
+            } else if (req->cycle < array[lineId].startCycle) {
+                *availCycle = array[lineId].availCycle - (array[lineId].startCycle - req->cycle);
+            } else {
+                *availCycle = array[lineId].availCycle;
+            }
+
             return lineId;
         }
     }
@@ -129,14 +182,14 @@ uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* w
         uint32_t pos = w*numSets + (hf->hash(w, lineAddr) & setMask);
         uint32_t lineId = lookupArray[pos];
         candidates[w].set(pos, lineId, -1);
-        all_valid &= (array[lineId] != 0);
+        all_valid &= (array[lineId].addr != 0);
         //info("Seed Candidate %d addr 0x%lx pos %d lineId %d", w, array[lineId], pos, lineId);
     }
 
     //Expand fringe in BFS fashion
     while (numCandidates < cands && all_valid) {
         uint32_t fringeId = candidates[fringeStart].lineId;
-        Address fringeAddr = array[fringeId];
+        Address fringeAddr = array[fringeId].addr;
         assert(fringeAddr);
         for (uint32_t w = 0; w < ways; w++) {
             uint32_t hval = hf->hash(w, fringeAddr) & setMask;
@@ -146,15 +199,15 @@ uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* w
             // Logically, you want to do this...
 #if 0
             if (lineId != fringeId) {
-                //info("Candidate %d way %d addr 0x%lx pos %d lineId %d parent %d", numCandidates, w, array[lineId], pos, lineId, fringeStart);
+                //info("Candidate %d way %d addr 0x%lx pos %d lineId %d parent %d", numCandidates, w, array[lineId].addr, pos, lineId, fringeStart);
                 candidates[numCandidates++].set(pos, lineId, (int32_t)fringeStart);
-                all_valid &= (array[lineId] != 0);
+                all_valid &= (array[lineId].addr != 0);
             }
 #endif
             // But this compiles as a branch and ILP sucks (this data-dependent branch is long-latency and mispredicted often)
             // Logically though, this is just checking for whether we're revisiting ourselves, so we can eliminate the branch as follows:
             candidates[numCandidates].set(pos, lineId, (int32_t)fringeStart);
-            all_valid &= (array[lineId] != 0);  // no problem, if lineId == fringeId the line's already valid, so no harm done
+            all_valid &= (array[lineId].addr != 0);  // no problem, if lineId == fringeId the line's already valid, so no harm done
             numCandidates += (lineId != fringeId); // if lineId == fringeId, the cand we just wrote will be overwritten
         }
         fringeStart++;
@@ -194,12 +247,12 @@ uint32_t ZArray::preinsert(const Address lineAddr, const MemReq* req, Address* w
     assert(swapArrayLen > 0);
 
     //Write address of line we're replacing
-    *wbLineAddr = array[bestCandidate];
+    *wbLineAddr = array[bestCandidate].addr;
 
     return bestCandidate;
 }
 
-void ZArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate) {
+void ZArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
     //We do the swaps in lookupArray, the array stays the same
     assert(lookupArray[swapArray[0]] == candidate);
     for (uint32_t i = 0; i < swapArrayLen-1; i++) {
@@ -210,9 +263,10 @@ void ZArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t cand
     //info("Inserting lineId %d in position %d", candidate, swapArray[swapArrayLen-1]);
 
     rp->replaced(candidate);
-    array[candidate] = lineAddr;
+    array[candidate].addr = lineAddr;
+    array[candidate].availCycle = respCycle;
+    array[candidate].startCycle = req->cycle;
     rp->update(candidate, req);
 
     statSwaps.inc(swapArrayLen-1);
 }
-

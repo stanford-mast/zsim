@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -58,7 +59,7 @@ class ClockStat : public ScalarStat {
         void end() {
             assert(startNs);
             uint64_t endNs = getNs();
-            assert(endNs >= startNs)
+            assert(endNs >= startNs);
             totalNs += (endNs - startNs);
             startNs = 0;
         }

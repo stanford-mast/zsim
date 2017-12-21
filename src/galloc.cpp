@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -25,16 +26,6 @@
 
 #include "galloc.h"
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-
-#include "log.h"  // NOLINT must precede dlmalloc, which defines assert if undefined
-#include "g_heap/dlmalloc.h.c"
-#include "locks.h"
-#include "pad.h"
 
 /* Base heap address. Has to be available cross-process. With 64-bit virtual
  * addresses, the address space is so sparse that it's quite easy to find
@@ -48,6 +39,54 @@
  * But, since I'm using a 64-bit address space, I don't really care to make
  * it fancy.
  */
+
+// Without Pin we can bypass the shared-memory allocator
+#ifdef TRACE_BASED
+
+#include <stdlib.h>
+#include <malloc.h>
+
+int gm_init(size_t segmentSize) {
+    return 0;
+}
+
+void gm_attach(int shmid) {
+}
+
+// C-style interface
+void* gm_malloc(size_t size) {
+    return malloc(size);
+}
+
+void* __gm_calloc(size_t num, size_t size) {
+    return calloc(num, size);
+}
+
+void* __gm_memalign(size_t blocksize, size_t bytes) {
+    return memalign(blocksize, bytes);
+}
+
+char* gm_strdup(const char* str) {
+    return strdup(str);
+}
+
+void gm_free(void* ptr) {
+    free(ptr);
+}
+
+#else
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+#include "log.h"  // NOLINT must precede dlmalloc, which defines assert if undefined
+#include "g_heap/dlmalloc.h.c"
+#include "locks.h"
+#include "pad.h"
+
 #define GM_BASE_ADDR ((const void*)0x00ABBA000000)
 
 struct gm_segment {
@@ -210,4 +249,4 @@ void gm_detach() {
     gm_shmid = 0;
 }
 
-
+#endif

@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -57,7 +58,7 @@ void DynUop::clear() {
     memset(this, 0, sizeof(DynUop));  // NOTE: This may break if DynUop becomes non-POD
 }
 
-Decoder::Instr::Instr(INS _ins) : ins(_ins), numLoads(0), numInRegs(0), numOutRegs(0), numStores(0) {
+Decoder::Instr::Instr(INS _ins, uint64_t _pc) : ins(_ins), pc(_pc), numLoads(0), numInRegs(0), numOutRegs(0), numStores(0) {
     uint32_t numOperands = INS_OperandCount(ins);
     for (uint32_t op = 0; op < numOperands; op++) {
         bool read = INS_OperandRead(ins, op);
@@ -128,10 +129,11 @@ void Decoder::emitLoad(Instr& instr, uint32_t idx, DynUopVec& uops, uint32_t des
 
     DynUop uop;
     uop.clear();
+    uop.pc = instr.pc;
     uop.rs[0] = baseReg;
     uop.rs[1] = indexReg;
     uop.rd[0] = destReg;
-    uop.type = UOP_LOAD;
+    uop.type = UopType::LOAD;
     uop.portMask = PORT_2;
     uops.push_back(uop); //FIXME: The interface should support in-place grow...
 }
@@ -154,21 +156,23 @@ void Decoder::emitStore(Instr& instr, uint32_t idx, DynUopVec& uops, uint32_t sr
 
     DynUop addrUop;
     addrUop.clear();
+    addrUop.pc = instr.pc;
     addrUop.rs[0] = baseReg;
     addrUop.rs[1] = indexReg;
     addrUop.rd[0] = addrReg;
     addrUop.lat = 1;
     addrUop.portMask = PORT_3;
-    addrUop.type = UOP_STORE_ADDR;
+    addrUop.type = UopType::STORE_ADDR;
     uops.push_back(addrUop);
 
     //Emit store uop
     DynUop uop;
     uop.clear();
+    uop.pc = instr.pc;
     uop.rs[0] = addrReg;
     uop.rs[1] = srcReg;
     uop.portMask = PORT_4;
-    uop.type = UOP_STORE;
+    uop.type = UopType::STORE;
     uops.push_back(uop);
 }
 
@@ -190,7 +194,7 @@ void Decoder::emitFence(DynUopVec& uops, uint32_t lat) {
     uop.clear();
     uop.lat = lat;
     uop.portMask = PORT_4; //to the store queue
-    uop.type = UOP_FENCE;
+    uop.type = UopType::FENCE;
     uops.push_back(uop);
 }
 
@@ -202,7 +206,7 @@ void Decoder::emitExecUop(uint32_t rs0, uint32_t rs1, uint32_t rd0, uint32_t rd1
     uop.rd[0] = rd0;
     uop.rd[1] = rd1;
     uop.lat = lat;
-    uop.type = UOP_GENERAL;
+    uop.type = UopType::GENERAL;
     uop.portMask = ports;
     uop.extraSlots = extraSlots;
     uops.push_back(uop);
@@ -499,13 +503,13 @@ void Decoder::dropStackRegister(Instr& instr) {
 }
 
 
-bool Decoder::decodeInstr(INS ins, DynUopVec& uops) {
+bool Decoder::decodeInstr(INS ins, uint64_t pc, DynUopVec& uops) {
     uint32_t initialUops = uops.size();
     bool inaccurate = false;
     xed_category_enum_t category = (xed_category_enum_t) INS_Category(ins);
     xed_iclass_enum_t opcode = (xed_iclass_enum_t) INS_Opcode(ins);
 
-    Instr instr(ins);
+    Instr instr(ins, pc);
 
     bool isLocked = false;
     // NOTE(dsm): IsAtomicUpdate == xchg or LockPrefix (xchg has in implicit lock prefix)
@@ -1222,11 +1226,11 @@ bool Decoder::canFuse(INS ins) {
     }
 }
 
-bool Decoder::decodeFusedInstrs(INS ins, DynUopVec& uops) {
+bool Decoder::decodeFusedInstrs(INS ins, uint64_t pc, DynUopVec& uops) {
     //assert(canFuse(ins)); //this better be true :)
 
-    Instr instr(ins);
-    Instr branch(INS_Next(ins));
+    Instr instr(ins, pc);
+    Instr branch(INS_Next(ins), INS_Address(INS_Next(ins)));  //NOTE: The PC doesn't matter here
 
     //instr should have 2 inputs (regs/mem), and 1 output (rflags), and branch should have 2 inputs (rip, rflags) and 1 output (rip)
 
@@ -1290,8 +1294,9 @@ BblInfo* Decoder::decodeBbl(BBL bbl, bool oooDecoding) {
         for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins)) {
             bool inaccurate = false;
             uint32_t prevUops = uopVec.size();
+            uint64_t pc = INS_Address(ins);
             if (Decoder::canFuse(ins)) {
-                inaccurate = Decoder::decodeFusedInstrs(ins, uopVec);
+                inaccurate = Decoder::decodeFusedInstrs(ins, pc, uopVec);
                 instrAddr.push_back(INS_Address(ins));
                 instrBytes.push_back(INS_Size(ins));
                 instrUops.push_back(uopVec.size() - prevUops);
@@ -1306,7 +1311,7 @@ BblInfo* Decoder::decodeBbl(BBL bbl, bool oooDecoding) {
 
                 curIns+=2;
             } else {
-                inaccurate = Decoder::decodeInstr(ins, uopVec);
+                inaccurate = Decoder::decodeInstr(ins, pc, uopVec);
 
                 instrAddr.push_back(INS_Address(ins));
                 instrBytes.push_back(INS_Size(ins));
@@ -1485,4 +1490,3 @@ void Decoder::dumpBblProfile() {
 }
 
 #endif
-

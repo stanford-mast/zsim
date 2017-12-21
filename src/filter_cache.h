@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -61,6 +62,14 @@ class FilterCache : public Cache {
         lock_t filterLock;
         uint64_t fGETSHit, fGETXHit;
 
+        struct PrefetchInfo {
+            Address addr;
+            uint32_t skip;
+
+            PrefetchInfo(Address _addr, uint32_t _skip) : addr(_addr), skip(_skip) {};
+        };
+        g_vector<PrefetchInfo> prefetchQueue;
+
     public:
         FilterCache(uint32_t _numSets, uint32_t _numLines, CC* _cc, CacheArray* _array,
                 ReplPolicy* _rp, uint32_t _accLat, uint32_t _invLat, g_string& _name)
@@ -80,8 +89,24 @@ class FilterCache : public Cache {
             srcId = id;
         }
 
+        uint32_t getSourceId() const {
+            return srcId;
+        }
+
         void setFlags(uint32_t flags) {
             reqFlags = flags;
+        }
+
+        enum class Type {
+            D, I
+        };
+
+        void setType(Type _type) {
+            type = _type;
+        }
+
+        Type getType() const {
+            return type;
         }
 
         void initStats(AggregateStat* parentStat) {
@@ -99,7 +124,7 @@ class FilterCache : public Cache {
             parentStat->append(cacheStat);
         }
 
-        inline uint64_t load(Address vAddr, uint64_t curCycle) {
+        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc) {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
@@ -107,11 +132,11 @@ class FilterCache : public Cache {
                 fGETSHit++;
                 return MAX(curCycle, availCycle);
             } else {
-                return replace(vLineAddr, idx, true, curCycle);
+                return replace(vLineAddr, idx, true, curCycle, pc);
             }
         }
 
-        inline uint64_t store(Address vAddr, uint64_t curCycle) {
+        inline uint64_t store(Address vAddr, uint64_t curCycle, Address pc) {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
@@ -121,15 +146,16 @@ class FilterCache : public Cache {
                 //filterArray[idx].availCycle = curCycle; //do optimistic store-load forwarding
                 return MAX(curCycle, availCycle);
             } else {
-                return replace(vLineAddr, idx, false, curCycle);
+                return replace(vLineAddr, idx, false, curCycle, pc);
             }
         }
 
-        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle) {
+        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc) {
+            assert(prefetchQueue.empty());
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;
             futex_lock(&filterLock);
-            MemReq req = {pLineAddr, isLoad? GETS : GETX, 0, &dummyState, curCycle, &filterLock, dummyState, srcId, reqFlags};
+            MemReq req = {pc, pLineAddr, isLoad? GETS : GETX, 0, &dummyState, curCycle, &filterLock, dummyState, srcId, reqFlags};
             uint64_t respCycle  = access(req);
 
             //Due to the way we do the locking, at this point the old address might be invalidated, but we have the new address guaranteed until we release the lock
@@ -143,6 +169,20 @@ class FilterCache : public Cache {
             //(e.g., st to x, ld from x+8) and we implement store-load forwarding at the core.
             //So if this is a load, it always sets availCycle; if it is a store hit, it doesn't
             if (oldAddr != vLineAddr) filterArray[idx].availCycle = respCycle;
+
+            //Send out any prefetch requests that were created during the prior access
+            if (unlikely(!prefetchQueue.empty())) {
+                for (auto& prefetch : prefetchQueue) {
+                    req.lineAddr = prefetch.addr;
+                    req.type = GETS;
+                    req.cycle = curCycle;  //XXX If caches don't modify this field then it doesn't need to be assigned
+                    dummyState = MESIState::I;
+                    req.flags = reqFlags | MemReq::PREFETCH | MemReq::SPECULATIVE;  //Always SPECULATIVE, PREFETCH until inserted
+                    req.prefetch = prefetch.skip;
+                    access(req);
+                }
+                prefetchQueue.clear();
+            }
 
             futex_unlock(&filterLock);
             return respCycle;
@@ -161,11 +201,23 @@ class FilterCache : public Cache {
             return respCycle;
         }
 
+        void schedulePrefetch(Address lineAddr, uint32_t skip) {
+            // A prefetch from any level of the memory hierarchy is inserted in the filter cache queue of the core
+            // whose demand access triggered the prefetch. By originating all prefetch requests from the filter caches,
+            // we avoid races and complexities that come with injecting new accesses into an in-progress request.
+            // The 'skip' parameter is decremented at each cache level and the prefetch block is allocated starting at
+            // the cache for which the value is zero.
+            prefetchQueue.emplace_back(lineAddr, skip);
+        }
+
         void contextSwitch() {
             futex_lock(&filterLock);
             for (uint32_t i = 0; i < numSets; i++) filterArray[i].clear();
             futex_unlock(&filterLock);
         }
+
+    private:
+        Type type;
 };
 
 #endif  // FILTER_CACHE_H_

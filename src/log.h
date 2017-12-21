@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -154,7 +155,7 @@ class PrintExpr {
  */
 /* FIXME: Better conditional tracing (e.g., via mask) */
 #ifdef _LOG_TRACE_
-#define trace(type, args...) \
+#define ZSIM_TRACE(type, args...) \
 { \
     if ( LOG_##type == LOG_Sched) { \
         log_lock(); \
@@ -166,7 +167,7 @@ class PrintExpr {
     } \
 }
 #else
-#define trace(type, args...)
+#define ZSIM_TRACE(type, args...)
 #endif
 
 /* assert() is already defined as of POSIX.1-2001 and C89.

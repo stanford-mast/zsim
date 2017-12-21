@@ -27,7 +27,9 @@
 #include "hash.h"
 
 #include "event_recorder.h"
+#ifndef EXTERNAL_CACHE_MODEL
 #include "timing_event.h"
+#endif
 #include "zsim.h"
 
 Cache::Cache(uint32_t _numLines, CC* _cc, CacheArray* _array, ReplPolicy* _rp, uint32_t _accLat, uint32_t _invLat, const g_string& _name)
@@ -63,21 +65,35 @@ uint64_t Cache::access(MemReq& req) {
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
     if (likely(!skipAccess)) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
-        int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement);
-        respCycle += accLat;
+        uint64_t availCycle;  //cycle the block is/will be available (valid only if MESI state is not I)
+        int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement, &availCycle);
+        if (lineId != -1 && cc->isValid(lineId)) {
+            //If the block is still inbound, increase the delay.
+            //This also fixes a (relatively infrequent) timing bug in the filter cache where the available cycle
+            //info is lost if a block in a set is replaced and then used again before the cycle is reached.
+            //Add accLat if a) line is in the cache or b) line is not in the cache. If c) line is in-flight (prefetch)
+            //serve from MSHR and do not account for accLat
+            respCycle = (availCycle > respCycle) ? availCycle : respCycle + accLat;
+        }
+        else { //Cache miss
+            respCycle += accLat;
+        }
+
+        bool need_postinsert = false;
 
         if (lineId == -1 && cc->shouldAllocate(req)) {
             //Make space for new line
             Address wbLineAddr;
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
-            trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
+            ZSIM_TRACE(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 
             //Evictions are not in the critical path in any sane implementation -- we do not include their delays
             //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
             cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
 
-            array->postinsert(req.lineAddr, &req, lineId); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            need_postinsert = true;  //defer the actual insertion until we know its cycle availability
         }
+#ifndef EXTERNAL_CACHE_MODEL
         // Enforce single-record invariant: Writeback access may have a timing
         // record. If so, read it.
         EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
@@ -86,9 +102,14 @@ uint64_t Cache::access(MemReq& req) {
         if (unlikely(evRec && evRec->hasRecord())) {
             wbAcc = evRec->popRecord();
         }
+#endif
 
         respCycle = cc->processAccess(req, lineId, respCycle);
+        if (need_postinsert) {
+            array->postinsert(req.lineAddr, &req, lineId, respCycle); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+        }
 
+#ifndef EXTERNAL_CACHE_MODEL
         // Access may have generated another timing record. If *both* access
         // and wb have records, stitch them together
         if (unlikely(wbAcc.isValid())) {
@@ -116,6 +137,7 @@ uint64_t Cache::access(MemReq& req) {
                 evRec->pushRecord(acc);
             }
         }
+#endif
     }
 
     cc->endAccess(req);
@@ -130,12 +152,13 @@ void Cache::startInvalidate() {
 }
 
 uint64_t Cache::finishInvalidate(const InvReq& req) {
-    int32_t lineId = array->lookup(req.lineAddr, nullptr, false);
+    uint64_t availCycle;
+    int32_t lineId = array->lookup(req.lineAddr, nullptr, false, &availCycle);
     assert_msg(lineId != -1, "[%s] Invalidate on non-existing address 0x%lx type %s lineId %d, reqWriteback %d", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback);
     uint64_t respCycle = req.cycle + invLat;
-    trace(Cache, "[%s] Invalidate start 0x%lx type %s lineId %d, reqWriteback %d", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback);
+    ZSIM_TRACE(Cache, "[%s] Invalidate start 0x%lx type %s lineId %d, reqWriteback %d", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback);
     respCycle = cc->processInv(req, lineId, respCycle); //send invalidates or downgrades to children, and adjust our own state
-    trace(Cache, "[%s] Invalidate end 0x%lx type %s lineId %d, reqWriteback %d, latency %ld", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback, respCycle - req.cycle);
+    ZSIM_TRACE(Cache, "[%s] Invalidate end 0x%lx type %s lineId %d, reqWriteback %d, latency %ld", name.c_str(), req.lineAddr, InvTypeName(req.type), lineId, *req.writeback, respCycle - req.cycle);
 
     return respCycle;
 }

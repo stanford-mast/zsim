@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -133,7 +134,8 @@ void TraceDriver::executeAccess(AccessRecord acc) {
                 if (!playPuts) return;
                 std::unordered_map<Address, MESIState>::iterator it = cStore.find(acc.lineAddr);
                 if (it == cStore.end()) return; //we don't currently have this line, skip
-                MemReq req = {acc.lineAddr, acc.type, acc.childId, &it->second, acc.reqCycle, nullptr, it->second, acc.childId};
+                MemReq req = {0 /*no PC*/, acc.lineAddr, acc.type, acc.childId, &it->second, acc.reqCycle, nullptr,
+                    it->second, acc.childId, 0 /*not a prefetch*/};
                 lat = parent->access(req) - acc.reqCycle; //note that PUT latency does not affect driver latency
                 assert(it->second == I);
                 cStore.erase(it);
@@ -147,7 +149,8 @@ void TraceDriver::executeAccess(AccessRecord acc) {
                 if (it != cStore.end()) {
                     if (!((it->second == S) && (acc.type == GETX))) { //we have the line, and it's not an upgrade miss, we can't replay this access directly
                         if (playAllGets) { //issue a PUT
-                            MemReq req = {acc.lineAddr, (it->second == M)? PUTX : PUTS, acc.childId, &it->second, acc.reqCycle, nullptr, it->second, acc.childId};
+                            MemReq req = {0 /*no PC*/, acc.lineAddr, (it->second == M)? PUTX : PUTS, acc.childId,
+                                &it->second, acc.reqCycle, nullptr, it->second, acc.childId, 0 /*not a prefetch*/};
                             parent->access(req);
                             assert(it->second == I);
                         } else {
@@ -157,7 +160,8 @@ void TraceDriver::executeAccess(AccessRecord acc) {
                         state = it->second;
                     }
                 }
-                MemReq req = {acc.lineAddr, acc.type, acc.childId, &state, acc.reqCycle, nullptr, state, acc.childId};
+                MemReq req = {0 /*no PC*/, acc.lineAddr, acc.type, acc.childId, &state, acc.reqCycle, nullptr, state,
+                    acc.childId, 0 /*not a prefetch*/};
                 uint64_t respCycle = parent->access(req);
                 lat = respCycle - acc.reqCycle;
                 children[acc.childId].profLat.inc(lat);
@@ -179,4 +183,3 @@ void TraceDriver::executeAccess(AccessRecord acc) {
         atw->write(wAcc);
     }
 }
-

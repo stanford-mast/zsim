@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -25,20 +26,8 @@
 
 #include "access_tracing.h"
 #include "bithacks.h"
-
-// Concatenate HDF5 header path prefix with the header file names, because
-// Ubuntu 15.04 and later change the HDF5 header path.
-#define _STR(x) #x
-#define STR(x) _STR(x)
-#ifdef HDF5INCPREFIX
-#include STR(HDF5INCPREFIX/hdf5.h)
-#include STR(HDF5INCPREFIX/hdf5_hl.h)
-#else
 #include <hdf5.h>
 #include <hdf5_hl.h>
-#endif
-#undef STR
-#undef _STR
 
 #define PT_CHUNKSIZE (1024*256u)  // 256K records (~6MB)
 

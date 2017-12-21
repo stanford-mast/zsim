@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -59,18 +60,17 @@ class SimpleCore : public Core {
 
     protected:
         //Simulation functions
-        inline void load(Address addr);
-        inline void store(Address addr);
+        inline void load(Address addr, Address pc);
+        inline void store(Address addr, Address pc);
         inline void bbl(Address bblAddr, BblInfo* bblInstrs);
 
-        static void LoadFunc(THREADID tid, ADDRINT addr);
-        static void StoreFunc(THREADID tid, ADDRINT addr);
+        static void LoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
+        static void StoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
         static void BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo);
-        static void PredLoadFunc(THREADID tid, ADDRINT addr, BOOL pred);
-        static void PredStoreFunc(THREADID tid, ADDRINT addr, BOOL pred);
+        static void PredLoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
+        static void PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
 
         static void BranchFunc(THREADID, ADDRINT, BOOL, ADDRINT, ADDRINT) {}
 }  ATTR_LINE_ALIGNED; //This needs to take up a whole cache line, or false sharing will be extremely frequent
 
 #endif  // SIMPLE_CORE_H_
-

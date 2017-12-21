@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -56,8 +57,9 @@ class IdealLRUArray : public CacheArray {
 
         struct Entry : InListNode<Entry> {
             Address lineAddr;
+            uint64_t respCycle;
             const uint32_t lineId;
-            explicit Entry(uint32_t _lineId) : lineAddr(0), lineId(_lineId) {}
+            explicit Entry(uint32_t _lineId) : lineAddr(0), respCycle(0), lineId(_lineId) {}
         };
 
         Entry* array;
@@ -78,11 +80,12 @@ class IdealLRUArray : public CacheArray {
             rp = new ProxyReplPolicy(this);
         }
 
-        int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+        int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
             g_unordered_map<Address, uint32_t>::iterator it = lineMap.find(lineAddr);
             if (it == lineMap.end()) return -1;
 
             uint32_t lineId = it->second;
+            *availCycle = array[lineId].respCycle;
             if (updateReplacement) {
                 lruList.remove(&array[lineId]);
                 lruList.push_front(&array[lineId]);
@@ -96,13 +99,14 @@ class IdealLRUArray : public CacheArray {
             return e->lineId;
         }
 
-        void postinsert(const Address lineAddr, const MemReq* req, uint32_t lineId) {
+        void postinsert(const Address lineAddr, const MemReq* req, uint32_t lineId, uint64_t respCycle) {
             Entry* e = &array[lineId];
 
             //Update addr mapping for lineId
             lineMap.erase(e->lineAddr);
             assert((lineMap.find(lineAddr) == lineMap.end()));
             e->lineAddr = lineAddr;
+            e->respCycle = respCycle;
             lineMap[lineAddr] = lineId;
 
             //Update repl
@@ -242,20 +246,28 @@ class IdealLRUPartReplPolicy : public PartReplPolicy {
 class IdealLRUPartArray : public CacheArray {
     private:
         g_unordered_map<Address, uint32_t> lineMap; //address->lineId; if too slow, try an AATree, which does not alloc dynamically
-        Address* lineAddrs; //lineId -> address, for replacements
+        AddrCycle* lineAddrs; //lineId -> {address, cycle}, for replacements
         IdealLRUPartReplPolicy* rp;
         uint32_t numLines;
 
     public:
         IdealLRUPartArray(uint32_t _numLines, IdealLRUPartReplPolicy* _rp) : rp(_rp), numLines(_numLines) {
-            lineAddrs = gm_calloc<Address>(numLines);
+            lineAddrs = gm_calloc<AddrCycle>(numLines);
         }
 
-        int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+        int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
             g_unordered_map<Address, uint32_t>::iterator it = lineMap.find(lineAddr);
             if (it == lineMap.end()) return -1;
 
             uint32_t lineId = it->second;
+
+            if (req->cycle > lineAddrs[lineId].availCycle) {
+                *availCycle = req->cycle;
+            } else if (req->cycle < lineAddrs[lineId].startCycle) {
+                *availCycle = lineAddrs[lineId].availCycle - (lineAddrs[lineId].startCycle - req->cycle);
+            } else {
+                *availCycle = lineAddrs[lineId].availCycle;
+            }
             if (updateReplacement) {
                 rp->update(lineId, req);
             }
@@ -264,15 +276,17 @@ class IdealLRUPartArray : public CacheArray {
 
         uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) {
             uint32_t lineId = rp->rank(req);
-            *wbLineAddr = lineAddrs[lineId];
+            *wbLineAddr = lineAddrs[lineId].addr;
             return lineId;
         }
 
-        void postinsert(const Address lineAddr, const MemReq* req, uint32_t lineId) {
+        void postinsert(const Address lineAddr, const MemReq* req, uint32_t lineId, uint64_t respCycle) {
             //Update addr mapping for lineId
-            lineMap.erase(lineAddrs[lineId]);
+            lineMap.erase(lineAddrs[lineId].addr);
             assert((lineMap.find(lineAddr) == lineMap.end()));
-            lineAddrs[lineId] = lineAddr;
+            lineAddrs[lineId].addr = lineAddr;
+            lineAddrs[lineId].availCycle = respCycle;
+            lineAddrs[lineId].startCycle = req->cycle;
             lineMap[lineAddr] = lineId;
 
             //Update repl

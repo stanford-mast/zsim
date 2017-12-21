@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -28,7 +29,7 @@
 
 #include <stdint.h>
 #include <vector>
-#include "pin.H"
+#include "wrapped_pin.h"
 
 // Uncomment to get a count of BBLs run. This is currently used to get a distribution of inaccurate instructions decoded that are actually run
 // NOTE: This is not multiprocess-safe
@@ -42,9 +43,10 @@
 /* NOTE this uses stronly typed enums, a C++11 feature. This saves a bunch of typecasts while keeping UopType enums 1-byte long.
  * If you use gcc < 4.6 or some other compiler, either go back to casting or lose compactness in the layout.
  */
-enum UopType : uint8_t {UOP_GENERAL, UOP_LOAD, UOP_STORE, UOP_STORE_ADDR, UOP_FENCE};
+enum class UopType : uint8_t {GENERAL, LOAD, LOADI, STORE, STORE_ADDR, FENCE};
 
 struct DynUop {
+    uint64_t pc;
     uint16_t rs[MAX_UOP_SRC_REGS];
     uint16_t rd[MAX_UOP_DST_REGS];
     uint16_t lat;
@@ -55,7 +57,7 @@ struct DynUop {
     uint8_t pad; //pad to 4-byte multiple
 
     void clear();
-};  // 16 bytes. TODO(dsm): check performance with wider operands
+};  // 24 bytes. TODO(dsm): check performance with wider operands
 
 struct DynBbl {
 #ifdef BBL_PROFILING
@@ -103,7 +105,8 @@ typedef std::vector<DynUop> DynUopVec;
 class Decoder {
     private:
         struct Instr {
-            INS ins;
+            const INS ins;
+            uint64_t pc;
 
             uint32_t loadOps[MAX_INSTR_LOADS];
             uint32_t numLoads;
@@ -117,7 +120,7 @@ class Decoder {
             uint32_t storeOps[MAX_INSTR_STORES];
             uint32_t numStores;
 
-            explicit Instr(INS _ins);
+            explicit Instr(const INS _ins, uint64_t _pc);
 
             private:
                 //Put registers in some canonical order -- non-flags first
@@ -135,7 +138,10 @@ class Decoder {
 
     private:
         //Return true if inaccurate decoding, false if accurate
-        static bool decodeInstr(INS ins, DynUopVec& uops);
+        static bool decodeInstr(const INS ins, uint64_t pc, DynUopVec& uops);
+#ifdef TRACE_BASED
+        static bool decodeCustomInstr(CustomOp cop, DynUopVec& uops);
+#endif
 
         /* Every emit function can produce 0 or more uops; it returns the number of uops. These are basic templates to make our life easier */
 
@@ -185,7 +191,13 @@ class Decoder {
 
         /* Macro-op (ins) fusion */
         static bool canFuse(INS ins);
-        static bool decodeFusedInstrs(INS ins, DynUopVec& uops);
+        static bool decodeFusedInstrs(INS ins, uint64_t pc, DynUopVec& uops);
+
+        static bool canFuse(const INS ins, const INS next);
+        static bool decodeFusedInstrs(const INS ins, uint64_t pc, const INS next, DynUopVec& uops);
+
+        /* Micro-op (ins) fusion */
+        static uint8_t fusableUops(const INS ins, uint64_t pc);
 };
 
 #endif  // DECODER_H_

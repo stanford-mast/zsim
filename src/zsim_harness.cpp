@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -201,7 +202,7 @@ static time_t startTime;
 static time_t lastHeartbeatTime;
 static uint64_t lastCycles = 0;
 
-static void printHeartbeat(GlobSimInfo* zinfo) {
+static void printHeartbeat(GlobSimInfo* zinfo, const char* outputDir) {
     uint64_t cycles = zinfo->numPhases*zinfo->phaseLength;
     time_t curTime = time(nullptr);
     time_t elapsedSecs = curTime - startTime;
@@ -214,7 +215,9 @@ static void printHeartbeat(GlobSimInfo* zinfo) {
     char hostname[256];
     gethostname(hostname, 256);
 
-    std::ofstream hb("heartbeat");
+    std::string hbPath(outputDir);
+    hbPath += "/heartbeat";
+    std::ofstream hb(hbPath);
     hb << "Running on: " << hostname << std::endl;
     hb << "Start time: " << ctime_r(&startTime, time);
     hb << "Heartbeat time: " << ctime_r(&curTime, time);
@@ -247,9 +250,9 @@ void LaunchProcess(uint32_t procIdx) {
         int nargs = args.size()+1;
         const char* aptrs[nargs];
 
-        trace(Harness, "Calling arguments:");
+        ZSIM_TRACE(Harness, "Calling arguments:");
         for (unsigned int i = 0; i < args.size(); i++) {
-            trace(Harness, " arg%d = %s", i, args[i].c_str());
+            ZSIM_TRACE(Harness, " arg%d = %s", i, args[i].c_str());
             aptrs[i] = args[i].c_str();
         }
         aptrs[nargs-1] = nullptr;
@@ -323,9 +326,12 @@ int main(int argc, char *argv[]) {
 
     //Canonicalize paths --- because we change dirs, we deal in absolute paths
     const char* configFile = realpath(argv[1], nullptr);
-    const char* outputDir = getcwd(nullptr, 0); //already absolute
+    const char* cwd = getcwd(nullptr, 0); //already absolute
 
     Config conf(configFile);
+
+    //The output directory may be set in the config file
+    const char* outputDir = realpath(conf.get<const char*>("sim.outputDir", cwd), nullptr);
 
     if (atexit(exitHandler)) panic("Could not register exit handler");
 
@@ -363,7 +369,7 @@ int main(int argc, char *argv[]) {
     //fprintf(stderr, "%sGlobal segment shmid = %d\n", logHeader, shmid); //hack to print shmid on both streams
     //fflush(stderr);
 
-    trace(Harness, "Created global segment, starting pin processes, shmid = %d", shmid);
+    ZSIM_TRACE(Harness, "Created global segment, starting pin processes, shmid = %d", shmid);
 
     //Do we need per-process direcories?
     perProcessDir = conf.get<bool>("sim.perProcessDir", false);
@@ -416,7 +422,7 @@ int main(int argc, char *argv[]) {
             info("Attached to global heap");
         }
 
-        printHeartbeat(zinfo);  // ensure we dump hostname etc on early crashes
+        printHeartbeat(zinfo, outputDir);  // ensure we dump hostname etc on early crashes
 
         int left = sleep(sleepLength);
         int secsSlept = sleepLength - left;
@@ -448,7 +454,7 @@ int main(int argc, char *argv[]) {
             } //otherwise, activeProcs == 0; we're done
         }
 
-        printHeartbeat(zinfo);
+        printHeartbeat(zinfo, outputDir);
 
         //This solves a weird race in multiprocess where SIGCHLD does not always fire...
         int cpid = -1;
@@ -474,4 +480,3 @@ int main(int argc, char *argv[]) {
     if (zinfo && zinfo->globalActiveProcs) warn("Unclean exit of %d children, termination stats were most likely not dumped", zinfo->globalActiveProcs);
     exit(exitCode);
 }
-

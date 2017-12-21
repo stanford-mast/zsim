@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -149,6 +150,8 @@ VOID FakeCPUIDPost(THREADID tid, ADDRINT* eax, ADDRINT* ebx, ADDRINT* ecx, ADDRI
 
 VOID FakeRDTSCPost(THREADID tid, REG* eax, REG* edx);
 
+VOID SyscallEnterUnlocked(THREADID tid, CONTEXT *ctxt);
+
 VOID VdsoInstrument(INS ins);
 VOID FFThread(VOID* arg);
 
@@ -165,12 +168,12 @@ VOID FFThread(VOID* arg);
 
 InstrFuncPtrs fPtrs[MAX_THREADS] ATTR_LINE_ALIGNED; //minimize false sharing
 
-VOID PIN_FAST_ANALYSIS_CALL IndirectLoadSingle(THREADID tid, ADDRINT addr) {
-    fPtrs[tid].loadPtr(tid, addr);
+VOID PIN_FAST_ANALYSIS_CALL IndirectLoadSingle(THREADID tid, ADDRINT addr, ADDRINT pc) {
+    fPtrs[tid].loadPtr(tid, addr, pc);
 }
 
-VOID PIN_FAST_ANALYSIS_CALL IndirectStoreSingle(THREADID tid, ADDRINT addr) {
-    fPtrs[tid].storePtr(tid, addr);
+VOID PIN_FAST_ANALYSIS_CALL IndirectStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc) {
+    fPtrs[tid].storePtr(tid, addr, pc);
 }
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectBasicBlock(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
@@ -181,12 +184,12 @@ VOID PIN_FAST_ANALYSIS_CALL IndirectRecordBranch(THREADID tid, ADDRINT branchPc,
     fPtrs[tid].branchPtr(tid, branchPc, taken, takenNpc, notTakenNpc);
 }
 
-VOID PIN_FAST_ANALYSIS_CALL IndirectPredLoadSingle(THREADID tid, ADDRINT addr, BOOL pred) {
-    fPtrs[tid].predLoadPtr(tid, addr, pred);
+VOID PIN_FAST_ANALYSIS_CALL IndirectPredLoadSingle(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred) {
+    fPtrs[tid].predLoadPtr(tid, addr, pc, pred);
 }
 
-VOID PIN_FAST_ANALYSIS_CALL IndirectPredStoreSingle(THREADID tid, ADDRINT addr, BOOL pred) {
-    fPtrs[tid].predStorePtr(tid, addr, pred);
+VOID PIN_FAST_ANALYSIS_CALL IndirectPredStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred) {
+    fPtrs[tid].predStorePtr(tid, addr, pc, pred);
 }
 
 
@@ -207,14 +210,14 @@ void Join(uint32_t tid) {
     fPtrs[tid] = cores[tid]->GetFuncPtrs(); //back to normal pointers
 }
 
-VOID JoinAndLoadSingle(THREADID tid, ADDRINT addr) {
+VOID JoinAndLoadSingle(THREADID tid, ADDRINT addr, ADDRINT pc) {
     Join(tid);
-    fPtrs[tid].loadPtr(tid, addr);
+    fPtrs[tid].loadPtr(tid, addr, pc);
 }
 
-VOID JoinAndStoreSingle(THREADID tid, ADDRINT addr) {
+VOID JoinAndStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc) {
     Join(tid);
-    fPtrs[tid].storePtr(tid, addr);
+    fPtrs[tid].storePtr(tid, addr, pc);
 }
 
 VOID JoinAndBasicBlock(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
@@ -227,21 +230,21 @@ VOID JoinAndRecordBranch(THREADID tid, ADDRINT branchPc, BOOL taken, ADDRINT tak
     fPtrs[tid].branchPtr(tid, branchPc, taken, takenNpc, notTakenNpc);
 }
 
-VOID JoinAndPredLoadSingle(THREADID tid, ADDRINT addr, BOOL pred) {
+VOID JoinAndPredLoadSingle(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred) {
     Join(tid);
-    fPtrs[tid].predLoadPtr(tid, addr, pred);
+    fPtrs[tid].predLoadPtr(tid, addr, pc, pred);
 }
 
-VOID JoinAndPredStoreSingle(THREADID tid, ADDRINT addr, BOOL pred) {
+VOID JoinAndPredStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred) {
     Join(tid);
-    fPtrs[tid].predStorePtr(tid, addr, pred);
+    fPtrs[tid].predStorePtr(tid, addr, pc, pred);
 }
 
 // NOP variants: Do nothing
-VOID NOPLoadStoreSingle(THREADID tid, ADDRINT addr) {}
+VOID NOPLoadStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc) {}
 VOID NOPBasicBlock(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {}
 VOID NOPRecordBranch(THREADID tid, ADDRINT addr, BOOL taken, ADDRINT takenNpc, ADDRINT notTakenNpc) {}
-VOID NOPPredLoadStoreSingle(THREADID tid, ADDRINT addr, BOOL pred) {}
+VOID NOPPredLoadStoreSingle(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred) {}
 
 // FF is basically NOP except for basic blocks
 VOID FFBasicBlock(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
@@ -591,6 +594,10 @@ VOID Instruction(INS ins) {
         INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR) FakeRDTSCPost, IARG_THREAD_ID, IARG_REG_REFERENCE, REG_EAX, IARG_REG_REFERENCE, REG_EDX, IARG_END);
     }
 
+    if (INS_IsSyscall(ins)) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) SyscallEnterUnlocked, IARG_CALL_ORDER, CALL_ORDER_LAST, IARG_THREAD_ID, IARG_CONTEXT, IARG_END);
+    }
+
     //Must run for every instruction
     VdsoInstrument(ins);
 }
@@ -711,52 +718,116 @@ void VdsoInit() {
 // Register hooks to intercept and virtualize time-related vsyscalls and vdso syscalls, as they do not show up as syscalls!
 // NOTE: getcpu is also a VDSO syscall, but is not patched for now
 
-// Per-thread VDSO data
-struct VdsoPatchData {
+// vDSO patch data for a single thread in a single context (multiple contexts allow signal handlers)
+struct VdsoPatchSingleton {
     // Input arguments --- must save them because they are not caller-saved
     // Careful: REG is 32 bits; PIN_REGISTER, which is the actual type of the
     // pointer, is 64 bits but opaque. We just use ADDRINT, it works
     ADDRINT arg0, arg1;
     VdsoFunc func;
     uint32_t level;  // if 0, invalid. Used for VDSO-internal calls
+
+    VdsoPatchSingleton(ADDRINT _arg0, ADDRINT _arg1, VdsoFunc _func, uint32_t _level) : arg0(_arg0), arg1(_arg1), func(_func), level(_level) {};
+    VdsoPatchSingleton() : arg0(0), arg1(0), func(VdsoFunc(0)), level(0) {};
 };
-VdsoPatchData vdsoPatchData[MAX_THREADS];
+
+// Per-thread vDSO context stack. New stack entries are pushed after a pin ContextChange callback (typically a signal),
+// and popped lazily after a return from such a context (a SIGRETURN reason in the ContextChange callback).
+// Without such a mechanism it would be incorrect to call vDSO functions within a signal handler if the prior context were already processing a vDSO
+class VdsoPatchStack {
+    private:
+        std::vector<VdsoPatchSingleton> patchStack[MAX_THREADS];
+
+    public:
+        VdsoPatchStack() {
+            // Each thread starts with vdso info for level 0 (i.e., not in a signal handler)
+            // This is never popped for performance reasons
+            for (uint32_t i = 0; i < MAX_THREADS; i++) {
+                patchStack[i].resize(1);
+            }
+        };
+        VdsoPatchSingleton &peek(THREADID tid) {
+            assert(patchStack[tid].size() > 0);
+            return patchStack[tid].back();
+        };
+        void push(THREADID tid, ADDRINT arg0, ADDRINT arg1, VdsoFunc func, uint32_t level) {
+            patchStack[tid].emplace_back(arg0, arg1, func, level);
+        };
+        void pop(THREADID tid) {
+            assert(patchStack[tid].size() > 0);
+            patchStack[tid].pop_back();
+        };
+        uint32_t size(THREADID tid) {
+            return (uint32_t)patchStack[tid].size();
+        };
+};
+VdsoPatchStack vdsoPatchData;
+
+// Per-thread signal depth info. (0 -> not in a signal handler, n>0 -> in level 'n' signal handler)
+unsigned int signalStackDepth[MAX_THREADS] = {};
 
 // Analysis functions
 
+// Helper function to laziliy clean up old vdso signal stacks. The alternative would be to register these actions for the SIGRETURN callback
+void vdsoDeferredStackCleanup(THREADID tid) {
+    if ((vdsoPatchData.size(tid) - 1) > signalStackDepth[tid]) {
+        // We need to clean up an old vdso fram from an earlier handler
+        if (vdsoPatchData.peek(tid).level) {
+            warn("vDSO missed a return in a context frame for tid %d", tid);
+        }
+        vdsoPatchData.pop(tid);
+    }
+}
+
+
 VOID VdsoEntryPoint(THREADID tid, uint32_t func, ADDRINT arg0, ADDRINT arg1) {
-    if (vdsoPatchData[tid].level) {
-        // common, in Ubuntu 11.10 several vdso functions jump back to the callpoint
-        // info("vDSO function (%d) called from vdso (%d), level %d, skipping", func, vdsoPatchData[tid].func, vdsoPatchData[tid].level);
+    uint32_t vdsoDepth = vdsoPatchData.size(tid) - 1;
+    uint32_t sigStackDepth = signalStackDepth[tid];
+    if (vdsoDepth < sigStackDepth) {
+        // We're in a new signal handler and need new vdso state for this context
+        vdsoPatchData.push(tid, arg0, arg1, (VdsoFunc)func, 1);
     } else {
-        vdsoPatchData[tid].arg0 = arg0;
-        vdsoPatchData[tid].arg1 = arg1;
-        vdsoPatchData[tid].func = (VdsoFunc)func;
-        vdsoPatchData[tid].level++;
+        vdsoDeferredStackCleanup(tid);
+        VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+        if (vdso.level) {
+            // common, in Ubuntu 11.10 several vdso functions jump back to the callpoint
+            // info("vDSO function (%d) called from vdso (%d), level %d, skipping", func, vdso.func, vdso.level);
+        } else {
+            vdso.arg0 = arg0;
+            vdso.arg1 = arg1;
+            vdso.func = (VdsoFunc)func;
+            vdso.level++;
+        }
     }
 }
 
 VOID VdsoCallPoint(THREADID tid) {
-    assert(vdsoPatchData[tid].level);
-    vdsoPatchData[tid].level++;
-    // info("vDSO internal callpoint, now level %d", vdsoPatchData[tid].level); //common
+    vdsoDeferredStackCleanup(tid);
+    VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+    assert(vdso.level);
+    vdso.level++;
+    // info("vDSO internal callpoint, now level %d", vdso.level); //common
 }
 
 VOID VdsoRetPoint(THREADID tid, REG* raxPtr) {
-    if (vdsoPatchData[tid].level == 0) {
+    vdsoDeferredStackCleanup(tid);
+
+    VdsoPatchSingleton &vdso = vdsoPatchData.peek(tid);
+    if (vdso.level == 0) {
         warn("vDSO return without matching call --- did we instrument all the functions?");
+        warn("    stack %d level %d", signalStackDepth[tid], vdso.level);
         return;
     }
-    vdsoPatchData[tid].level--;
-    if (vdsoPatchData[tid].level) {
-        // info("vDSO return post level %d, skipping ret handling", vdsoPatchData[tid].level); //common
+    vdso.level--;
+    if (vdso.level) {
+        // info("vDSO return post level %d, skipping ret handling", vdso.level); //common
         return;
     }
-    if (fPtrs[tid].type != FPTR_NOP || vdsoPatchData[tid].func == VF_GETCPU) {
-        // info("vDSO patching for func %d", vdsoPatchData[tid].func);  // common
-        ADDRINT arg0 = vdsoPatchData[tid].arg0;
-        ADDRINT arg1 = vdsoPatchData[tid].arg1;
-        switch (vdsoPatchData[tid].func) {
+    if (fPtrs[tid].type != FPTR_NOP || vdso.func == VF_GETCPU) {
+        // info("vDSO patching for func %d", vdso.func);  // common
+        ADDRINT arg0 = vdso.arg0;
+        ADDRINT arg1 = vdso.arg1;
+        switch (vdso.func) {
             case VF_CLOCK_GETTIME:
                 VirtClockGettime(tid, arg0, arg1);
                 break;
@@ -773,7 +844,7 @@ VOID VdsoRetPoint(THREADID tid, REG* raxPtr) {
                 }
                 break;
             default:
-                panic("vDSO garbled func %d", vdsoPatchData[tid].func);
+                panic("vDSO garbled func %d", vdso.func);
         }
     }
 }
@@ -804,6 +875,14 @@ VOID VdsoInstrument(INS ins) {
 
 bool activeThreads[MAX_THREADS];  // set in ThreadStart, reset in ThreadFini, we need this for exec() (see FollowChild)
 bool inSyscall[MAX_THREADS];  // set in SyscallEnter, reset in SyscallExit, regardless of state. We MAY need this for ContextChange
+
+#define MOD_SYSCALL_ARGS_NUM 6
+#define MOD_SYSCALL_NUMBER_INDEX 6
+#define MOD_SYSCALL_FLAG_INDEX 7
+#define MOD_SYSCALL_INDEXES 8
+// Per-thread storage to transfer modified syscall arguments between invocations of SyscallEnterUnlocked and SyscallEnterLocked.
+// Modified syscall args are stored at indexes [0:5], syscall number - at index 6, flag indicating modification - at index 7.
+static ADDRINT modifiedSyscallArgs[MAX_THREADS][MOD_SYSCALL_INDEXES]; // set in SyscallEnterUnlocked, used in SyscallEnterLocked
 
 uint32_t CountActiveThreads() {
     // Finish all threads in this process w.r.t. the global scheduler
@@ -867,7 +946,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v) {
 }
 
 VOID SimThreadFini(THREADID tid) {
-    // zinfo->sched->leave(); //exit syscall (SyscallEnter) already leaves
+  //zinfo->sched->leave(); //exit syscall (SyscallEnter) already leaves
     zinfo->sched->finish(procIdx, tid);
     activeThreads[tid] = false;
     cids[tid] = UNINITIALIZED_CID; //clear this cid, it might get reused
@@ -884,13 +963,53 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 flags, VOID *v) {
     }
 }
 
-//Need to remove ourselves from running threads in case the syscall is blocking
-VOID SyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
+// Saves modified syscall args in SyscallEnterUnlocked
+VOID SaveModifiedSyscallArgs(THREADID tid, CONTEXT *ctxtMod, CONTEXT *ctxtOrig) {
+    ADDRINT modified = 0;
+    SYSCALL_STANDARD std = SYSCALL_STANDARD_IA32E_LINUX;
+    if (PIN_GetSyscallNumber(ctxtMod, std) != PIN_GetSyscallNumber(ctxtOrig, std)) {
+        modified = 1;
+    }
+    for (uint32_t argInd = 0; (argInd < MOD_SYSCALL_ARGS_NUM) && !modified; argInd++) {
+        if (PIN_GetSyscallArgument(ctxtMod, std, argInd) != PIN_GetSyscallArgument(ctxtOrig, std, argInd)) {
+            modified = 1;
+        }
+    }
+    if (modified) {
+        modifiedSyscallArgs[tid][MOD_SYSCALL_NUMBER_INDEX] = PIN_GetSyscallNumber(ctxtMod, std);
+        for (uint32_t argInd = 0; argInd < MOD_SYSCALL_ARGS_NUM; argInd++) {
+            modifiedSyscallArgs[tid][argInd] = PIN_GetSyscallArgument(ctxtMod, std, argInd);
+        }
+        modifiedSyscallArgs[tid][MOD_SYSCALL_FLAG_INDEX] = modified;
+    }
+}
+
+// Writes modified syscall args in SyscallEnterLocked
+VOID WriteModifiedSyscallArgs(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std) {
+    assert(std == SYSCALL_STANDARD_IA32E_LINUX);
+    if (modifiedSyscallArgs[tid][MOD_SYSCALL_FLAG_INDEX]) {
+        PIN_SetSyscallNumber(ctxt, std, modifiedSyscallArgs[tid][MOD_SYSCALL_NUMBER_INDEX]);
+        for (uint32_t argInd = 0; argInd < MOD_SYSCALL_ARGS_NUM; argInd++) {
+            PIN_SetSyscallArgument(ctxt, std, argInd, modifiedSyscallArgs[tid][argInd]);
+        }
+        modifiedSyscallArgs[tid][MOD_SYSCALL_FLAG_INDEX] = 0;
+    }
+}
+
+// Performs action related to SyscallEnter without acquiring the Pin internal lock.
+// Need to remove ourselves from running threads in case the syscall is blocking.
+// Note: the rationale for having two methods SyscallEnterUnlocked and SyscallEnterLocked
+// is descibed at https://github.com/s5z/zsim/issues/57
+VOID SyscallEnterUnlocked(THREADID tid, CONTEXT *ctxt) {
+
+    CONTEXT ctxtOrig = *ctxt;
+    SYSCALL_STANDARD std = SYSCALL_STANDARD_IA32E_LINUX;
     bool isNopThread = fPtrs[tid].type == FPTR_NOP;
     bool isRetryThread = fPtrs[tid].type == FPTR_RETRY;
 
     if (!isRetryThread) {
         VirtSyscallEnter(tid, ctxt, std, procTreeNode->getPatchRoot(), isNopThread);
+        SaveModifiedSyscallArgs(tid, ctxt, &ctxtOrig);
     }
 
     assert(!inSyscall[tid]); inSyscall[tid] = true;
@@ -906,14 +1025,19 @@ VOID SyscallEnter(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
         uint32_t cid = getCid(tid);
         // set an invalid cid, ours is property of the scheduler now!
         clearCid(tid);
-
         zinfo->sched->syscallLeave(procIdx, tid, cid, PIN_GetContextReg(ctxt, REG_INST_PTR),
-                PIN_GetSyscallNumber(ctxt, std), PIN_GetSyscallArgument(ctxt, std, 0),
-                PIN_GetSyscallArgument(ctxt, std, 1));
+                                   PIN_GetSyscallNumber(ctxt, std), PIN_GetSyscallArgument(ctxt, std, 0),
+                                   PIN_GetSyscallArgument(ctxt, std, 1));
         //zinfo->sched->leave(procIdx, tid, cid);
         fPtrs[tid] = joinPtrs;  // will join at the next instr point
         //info("SyscallEnter %d", tid);
     }
+}
+
+// Performs action related to SyscallEnter with acquiring the Pin internal lock
+VOID SyscallEnterLocked(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
+    assert(inSyscall[tid]);
+    WriteModifiedSyscallArgs(tid, ctxt, std);
 }
 
 VOID SyscallExit(THREADID tid, CONTEXT *ctxt, SYSCALL_STANDARD std, VOID *v) {
@@ -960,9 +1084,12 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
             break;
         case CONTEXT_CHANGE_REASON_SIGNAL:
             reasonStr = "SIGNAL";
+            signalStackDepth[tid]++;
             break;
         case CONTEXT_CHANGE_REASON_SIGRETURN:
             reasonStr = "SIGRETURN";
+            assert(signalStackDepth[tid] > 0);
+            signalStackDepth[tid]--;
             break;
         case CONTEXT_CHANGE_REASON_APC:
             reasonStr = "APC";
@@ -975,7 +1102,7 @@ VOID ContextChange(THREADID tid, CONTEXT_CHANGE_REASON reason, const CONTEXT* fr
             break;
     }
 
-    warn("[%d] ContextChange, reason %s, inSyscall %d", tid, reasonStr, inSyscall[tid]);
+    warn("[%d] ContextChange, reason %s (%d), inSyscall %d, sigLevel: %d", tid, reasonStr, info, inSyscall[tid], vdsoPatchData.peek(tid).level);
     if (inSyscall[tid]) {
         SyscallExit(tid, to, SYSCALL_STANDARD_IA32E_LINUX, nullptr);
     }
@@ -1492,7 +1619,7 @@ int main(int argc, char *argv[]) {
     if (!masterProcess) procTreeNode->notifyStart(); //masterProcess notifyStart is called in init() to avoid races
     assert(procTreeNode->getProcIdx() == (uint32_t)procIdx); //must be consistent
 
-    trace(Process, "SHM'd global segment, starting");
+    ZSIM_TRACE(Process, "SHM'd global segment, starting");
 
     assert(zinfo->phaseLength > 0);
     assert(zinfo->maxPhases >= 0);
@@ -1535,7 +1662,7 @@ int main(int argc, char *argv[]) {
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);
 
-    PIN_AddSyscallEntryFunction(SyscallEnter, 0);
+    PIN_AddSyscallEntryFunction(SyscallEnterLocked, 0);
     PIN_AddSyscallExitFunction(SyscallExit, 0);
     PIN_AddContextChangeFunction(ContextChange, 0);
 
@@ -1568,4 +1695,3 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
-

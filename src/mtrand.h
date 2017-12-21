@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -194,9 +195,9 @@ inline void MTRand::initialize(const uint64_t seed) {
     // See Knuth TAOCP Vol 2, 3rd Ed, p.106 for multiplier.
     // In previous versions, most significant bits (MSBs) of the seed affect
     // only MSBs of the state array.  Modified 9 Jan 2002 by Makoto Matsumoto.
-    register uint64_t *s = state;
-    register uint64_t *r = state;
-    register int i = 1;
+    uint64_t *s = state;
+    uint64_t *r = state;
+    int i = 1;
     *s++ = seed & 0xffffffffUL;
     for (; i < N; ++i) {
         *s++ = (1812433253UL * (*r ^ (*r >> 30)) + i) & 0xffffffffUL;
@@ -208,8 +209,8 @@ inline void MTRand::reload() {
     // Generate N new values in state
     // Made clearer and faster by Matthew Bellew (matthew.bellew@home.com)
     static const int MmN = int(M) - int(N);  // in case enums are unsigned
-    register uint64_t *p = state;
-    register int i;
+    uint64_t *p = state;
+    int i;
     for (i = N - M; i--; ++p)
         *p = twist(p[M], p[0], p[1]);
     for (i = M; --i; ++p)
@@ -233,9 +234,9 @@ inline void MTRand::seed(uint64_t *const bigSeed, const uint64_t seedLength) {
     // in each element are discarded.
     // Just call seed() if you want to get array from /dev/urandom
     initialize(19650218UL);
-    register int i = 1;
-    register uint64_t j = 0;
-    register int k = (N > seedLength ? N : seedLength);
+    int i = 1;
+    uint64_t j = 0;
+    int k = (N > seedLength ? N : seedLength);
     for (; k; --k) {
         state[i] =
             state[i] ^ ((state[i-1] ^ (state[i-1] >> 30)) * 1664525UL);
@@ -265,9 +266,9 @@ inline void MTRand::seed() {
     FILE* urandom = fopen("/dev/urandom", "rb");
     if (urandom) {
         uint64_t bigSeed[N];
-        register uint64_t *s = bigSeed;
-        register int i = N;
-        register bool success = true;
+        uint64_t *s = bigSeed;
+        int i = N;
+        bool success = true;
         while (success && i--)
             success = fread(s++, sizeof(uint64_t), 1, urandom);
         fclose(urandom);
@@ -287,9 +288,9 @@ inline MTRand::MTRand(uint64_t *const bigSeed, const uint64_t seedLength) {
 inline MTRand::MTRand() { seed(); }
 
 inline MTRand::MTRand(const MTRand& o) {
-    register const uint64_t *t = o.state;
-    register uint64_t *s = state;
-    register int i = N;
+    const uint64_t *t = o.state;
+    uint64_t *s = state;
+    int i = N;
     for (; i--; *s++ = *t++) {}
     left = o.left;
     pNext = &state[N-left];
@@ -302,7 +303,7 @@ inline uint64_t MTRand::randInt() {
     if (left == 0) reload();
     --left;
 
-    register uint64_t s1;
+    uint64_t s1;
     s1 = *pNext++;
     s1 ^= (s1 >> 11);
     s1 ^= (s1 <<  7) & 0x9d2c5680UL;
@@ -363,32 +364,32 @@ inline double MTRand::operator()() {
 }
 
 inline void MTRand::save(uint64_t* saveArray) const {
-    register const uint64_t *s = state;
-    register uint64_t *sa = saveArray;
-    register int i = N;
+    const uint64_t *s = state;
+    uint64_t *sa = saveArray;
+    int i = N;
     for (; i--; *sa++ = *s++) {}
     *sa = left;
 }
 
 inline void MTRand::load(uint64_t *const loadArray) {
-    register uint64_t *s = state;
-    register uint64_t *la = loadArray;
-    register int i = N;
+    uint64_t *s = state;
+    uint64_t *la = loadArray;
+    int i = N;
     for (; i--; *s++ = *la++) {}
     left = *la;
     pNext = &state[N-left];
 }
 
 inline std::ostream& operator<<(std::ostream& os, const MTRand& mtrand) {
-    register const uint64_t *s = mtrand.state;
-    register int i = mtrand.N;
+    const uint64_t *s = mtrand.state;
+    int i = mtrand.N;
     for (; i--; os << *s++ << "\t") {}
     return os << mtrand.left;
 }
 
 inline std::istream& operator>>(std::istream& is, MTRand& mtrand) {
-    register uint64_t *s = mtrand.state;
-    register int i = mtrand.N;
+    uint64_t *s = mtrand.state;
+    int i = mtrand.N;
     for (; i--; is >> *s++) {}
     is >> mtrand.left;
     mtrand.pNext = &mtrand.state[mtrand.N-mtrand.left];
@@ -397,9 +398,9 @@ inline std::istream& operator>>(std::istream& is, MTRand& mtrand) {
 
 inline MTRand& MTRand::operator=(const MTRand& o) {
     if (this == &o) return (*this);
-    register const uint64_t *t = o.state;
-    register uint64_t *s = state;
-    register int i = N;
+    const uint64_t *t = o.state;
+    uint64_t *s = state;
+    int i = N;
     for (; i--; *s++ = *t++) {}
     left = o.left;
     pNext = &state[N-left];

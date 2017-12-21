@@ -26,20 +26,14 @@
 #include "coherence_ctrls.h"
 #include "cache.h"
 #include "network.h"
+#include "hash.h"
 
 /* Do a simple XOR block hash on address to determine its bank. Hacky for now,
  * should probably have a class that deals with this with a real hash function
  * (TODO)
  */
 uint32_t MESIBottomCC::getParentId(Address lineAddr) {
-    //Hash things a bit
-    uint32_t res = 0;
-    uint64_t tmp = lineAddr;
-    for (uint32_t i = 0; i < 4; i++) {
-        res ^= (uint32_t) ( ((uint64_t)0xffff) & tmp);
-        tmp = tmp >> 16;
-    }
-    return (res % parents.size());
+    return CacheBankHash::hash(lineAddr, parents.size());
 }
 
 
@@ -67,13 +61,13 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
         case S:
         case E:
             {
-                MemReq req = {wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTS, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;
         case M:
             {
-                MemReq req = {wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/};
+                MemReq req = {0 /*no PC*/, wbLineAddr, PUTX, selfId, state, cycle, &ccLock, *state, srcId, 0 /*no flags*/, 0 /*not a prefetch*/};
                 respCycle = parents[getParentId(wbLineAddr)]->access(req);
             }
             break;
@@ -84,9 +78,23 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
     return respCycle;
 }
 
-uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags) {
+uint64_t MESIBottomCC::processAccess(Address lineAddr, int32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags, Address pc, uint32_t skip) {
     uint64_t respCycle = cycle;
+    if (skip > 0) {
+        //This is a prefetch request that does not want to be allocated at this cache level
+        if (lineId == -1 || array[lineId] == I) {
+            MESIState dummyState = I;
+            uint32_t parentId = getParentId(lineAddr);
+            MemReq req = {pc, lineAddr, GETS, selfId, &dummyState, cycle, &ccLock, dummyState, srcId, flags, skip - 1};
+            parents[parentId]->access(req);
+            profSpecGETSMiss.inc();
+        } else {
+            profSpecGETSHit.inc();
+        }
+        return respCycle;
+    }
     MESIState* state = &array[lineId];
+    assert((type == GETS) || !(flags && MemReq::SPECULATIVE));  //A prefetch is only GETS even if triggered by GETX
     switch (type) {
         // A PUTS/PUTX does nothing w.r.t. higher coherence levels --- it dies here
         case PUTS: //Clean writeback, nothing to do (except profiling)
@@ -104,14 +112,20 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessTy
         case GETS:
             if (*state == I) {
                 uint32_t parentId = getParentId(lineAddr);
-                MemReq req = {lineAddr, GETS, selfId, state, cycle, &ccLock, *state, srcId, flags};
+                MemReq req = {pc, lineAddr, GETS, selfId, state, cycle, &ccLock, *state, srcId, flags, 0 /*not a prefetch*/};
                 uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
                 uint32_t netLat = parentRTTs[parentId];
-                profGETNextLevelLat.inc(nextLevelLat);
-                profGETNetLat.inc(netLat);
                 respCycle += nextLevelLat + netLat;
-                profGETSMiss.inc();
+                if (flags & MemReq::SPECULATIVE) {
+                    profSpecGETSMiss.inc();
+                } else {
+                    profGETNextLevelLat.inc(nextLevelLat);
+                    profGETNetLat.inc(netLat);
+                    profGETSMiss.inc();
+                }
                 assert(*state == S || *state == E);
+            } else if (flags & MemReq::SPECULATIVE) {
+                profSpecGETSHit.inc();
             } else {
                 profGETSHit.inc();
             }
@@ -122,7 +136,7 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessTy
                 if (*state == I) profGETXMissIM.inc();
                 else profGETXMissSM.inc();
                 uint32_t parentId = getParentId(lineAddr);
-                MemReq req = {lineAddr, GETX, selfId, state, cycle, &ccLock, *state, srcId, flags};
+                MemReq req = {pc, lineAddr, GETX, selfId, state, cycle, &ccLock, *state, srcId, flags, 0 /*not a prefetch*/};
                 uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
                 uint32_t netLat = parentRTTs[parentId];
                 profGETNextLevelLat.inc(nextLevelLat);
@@ -190,7 +204,7 @@ uint64_t MESIBottomCC::processNonInclusiveWriteback(Address lineAddr, AccessType
     if (!nonInclusiveHack) panic("Non-inclusive %s on line 0x%lx, this cache should be inclusive", AccessTypeName(type), lineAddr);
 
     //info("Non-inclusive wback, forwarding");
-    MemReq req = {lineAddr, type, selfId, state, cycle, &ccLock, *state, srcId, flags | MemReq::NONINCLWB};
+    MemReq req = {0 /*no PC*/, lineAddr, type, selfId, state, cycle, &ccLock, *state, srcId, flags | MemReq::NONINCLWB, 0 /*not a prefetch*/};
     uint64_t respCycle = parents[getParentId(lineAddr)]->access(req);
     return respCycle;
 }
@@ -279,13 +293,13 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
             *childState = I;
             break;
         case GETS:
-            if (e->isEmpty() && haveExclusive && !(flags & MemReq::NOEXCL)) {
+          if (e->isEmpty() && haveExclusive && !(flags & MemReq::NOEXCL)) {
                 //Give in E state
                 e->exclusive = true;
                 e->sharers[childId] = true;
                 e->numSharers = 1;
                 *childState = E;
-            } else {
+          } else {
                 //Give in S state
                 assert(e->sharers[childId] == false);
 
@@ -340,4 +354,3 @@ uint64_t MESITopCC::processInval(Address lineAddr, uint32_t lineId, InvType type
         return sendInvalidates(lineAddr, lineId, type, reqWriteback, cycle, srcId);
     }
 }
-

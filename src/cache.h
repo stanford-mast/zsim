@@ -58,15 +58,21 @@ class Cache : public BaseCache {
     public:
         Cache(uint32_t _numLines, CC* _cc, CacheArray* _array, ReplPolicy* _rp, uint32_t _accLat, uint32_t _invLat, const g_string& _name);
 
-        const char* getName();
-        void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network);
-        void setChildren(const g_vector<BaseCache*>& children, Network* network);
-        void initStats(AggregateStat* parentStat);
-
-        virtual uint64_t access(MemReq& req);
+        const char* getName() override;
+        void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network) override;
+        g_vector<MemObject*>* getParents() override {return cc->getParents();}
+        void setChildren(const g_vector<BaseCache*>& children, Network* network) override;
+        g_vector<BaseCache*>* getChildren() override {return cc->getChildren();}
+        void initStats(AggregateStat* parentStat) override;
+        bool isPresent(Address lineAddr) {
+            uint64_t avail_cycle;
+            int32_t lineId = array->lookup(lineAddr, nullptr, false, &avail_cycle);
+            return (lineId != -1 && cc->isValid(lineId));
+        }
+        virtual uint64_t access(MemReq& req) override;
 
         //NOTE: reqWriteback is pulled up to true, but not pulled down to false.
-        virtual uint64_t invalidate(const InvReq& req) {
+        virtual uint64_t invalidate(const InvReq& req) override {
             startInvalidate();
             return finishInvalidate(req);
         }

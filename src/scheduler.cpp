@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -280,12 +281,43 @@ void Scheduler::syscallLeave(uint32_t pid, uint32_t tid, uint32_t cid, uint64_t 
     assert(th->state == RUNNING);
     assert_msg(pid < blockingSyscalls.size(), "%d >= %ld?", pid, blockingSyscalls.size());
 
+    /* Google Switchto handling */
+    ThreadInfo *switchto = NULL;
+    if (syscallNumber == SYS_google_syscall_switchto) {
+      switch ((int64_t)arg0) { //arg0 is switchto op
+        case SYS_SWITCHTO_SET_FLAGS:
+        case SYS_SWITCHTO_SETID:
+          assert(0); //Not yet supported
+          break;
+        case SYS_SWITCHTO_WAIT:
+          break;
+        case SYS_SWITCHTO_SWITCH:
+          futex_lock(&gidMapLock);
+          switchto = fidMap[arg1]; //arg1 contains switchto thread
+          futex_unlock(&gidMapLock);
+          break;
+        case SYS_SWITCHTO_RESUME:
+          futex_lock(&gidMapLock);
+          switchto = fidMap[arg1]; //arg1 contains switchto thread
+          futex_unlock(&gidMapLock);
+          break;
+        case SYS_SWITCHTO_SWITCH_CROSS_PROC:
+        case SYS_SWITCHTO_RESUME_CROSS_PROC:
+        case SYS_SWITCHTO_SWITCH_POLLED:
+          assert(0); //Not yet supported
+          break;
+        default:
+          assert(0);
+          break;
+      }
+    }
+
     bool blacklisted = blockingSyscalls[pid].find(pc) != blockingSyscalls[pid].end();
     if (blacklisted || th->markedForSleep || !th->mask[cid]) {
         // (mgao): thread mask may be updated by SYS_sched_setaffinity syscall, in which case it must do true leave.
         DEBUG_FL("%s @ 0x%lx calling leave(), reason: %s", GetSyscallName(syscallNumber), pc, blacklisted? "blacklist" : (th->markedForSleep ? "sleep" : "affinity"));
         futex_unlock(&schedLock);
-        leave(pid, tid, cid);
+        leave(pid, tid, cid, switchto);
     } else {
         DEBUG_FL("%s @ 0x%lx skipping leave()", GetSyscallName(syscallNumber), pc);
         FakeLeaveInfo* si = new FakeLeaveInfo(pc, th, syscallNumber, arg0, arg1);
@@ -409,4 +441,3 @@ void Scheduler::waitUntilQueued(ThreadInfo* th) {
         }
     }
 }
-

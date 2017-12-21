@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -111,7 +112,7 @@ class SlabAlloc {
                 ptr = curSlab->alloc(sz);
                 assert(ptr);
             }
-            assert((((uintptr_t)ptr) & SLAB_MASK) == (uintptr_t)curSlab)
+            assert((((uintptr_t)ptr) & SLAB_MASK) == (uintptr_t)curSlab);
             return ptr;
         }
 

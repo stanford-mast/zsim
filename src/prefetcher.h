@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -71,8 +72,8 @@ class StreamPrefetcher : public BaseCache {
                 void fill(uint32_t s, uint64_t r) { startCycle = s; respCycle = r; }
             };
 
-            AccessTimes times[64];
-            std::bitset<64> valid;
+            std::vector<AccessTimes> times;
+            std::vector<bool> valid;
 
             uint32_t lastPos;
             uint32_t lastLastPos;
@@ -86,31 +87,52 @@ class StreamPrefetcher : public BaseCache {
                 lastLastPos = 0;
                 lastPrefetchPos = 0;
                 conf.reset();
-                valid.reset();
+                std::fill(valid.begin(), valid.end(), false);
                 lastCycle = curCycle;
             }
+
+            Entry (uint32_t distance) : stride(1), times(distance),
+                                        valid(distance, false), lastPos(0),
+                                        lastLastPos(0), lastPrefetchPos(0),
+                                        lastCycle(0), ts(0) {conf.reset();};
         };
 
         uint64_t timestamp;  // for LRU
-        Address tag[16];
-        Entry array[16];
+        uint32_t log_distance;
+        uint32_t distance; //Default 64. Bounds prefetch look ahead. Prefetcher will only fetch within a page with size=distance*cache_line_size (64 for 4K pages).
+        std::vector<Address> tag;
+        std::vector<Entry> array;
 
-        Counter profAccesses, profPrefetches, profDoublePrefetches, profPageHits, profHits, profShortHits, profStrideSwitches, profLowConfAccs;
+        Counter profAccesses, profPrefetches, profDoublePrefetches,
+            profTriplePrefetches, profQuadPrefetches, profPageHits, profHits,
+            profShortHits, profStrideSwitches, profLowConfAccs;
 
+        g_vector<MemObject*> parents;
         MemObject* parent;
         BaseCache* child;
+        g_vector<BaseCache*> children;
         uint32_t childId;
         g_string name;
+        uint32_t streams; //Default 16. Number of streams being monitored
+        uint32_t degree;  //Default 2. agressiveness, number of prefetches issued at once until we reach distance
 
     public:
-        explicit StreamPrefetcher(const g_string& _name) : timestamp(0), name(_name) {}
-        void initStats(AggregateStat* parentStat);
-        const char* getName() { return name.c_str();}
-        void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network);
-        void setChildren(const g_vector<BaseCache*>& children, Network* network);
+        explicit StreamPrefetcher(const g_string& _name, uint32_t _streams,
+                                  uint32_t _log_distance, uint32_t _degree) :
+            timestamp(0), log_distance(_log_distance),
+            distance(1 << log_distance), tag(_streams),
+            array(_streams, distance), name(_name),
+            streams(_streams), degree(_degree) {};
 
-        uint64_t access(MemReq& req);
-        uint64_t invalidate(const InvReq& req);
+        void initStats(AggregateStat* parentStat) override;
+        const char* getName() override { return name.c_str();}
+        void setParents(uint32_t _childId, const g_vector<MemObject*>& _parents, Network* _network) override;
+        g_vector<MemObject*>* getParents() override;
+        void setChildren(const g_vector<BaseCache*>& children, Network* network) override;
+        g_vector<BaseCache*>* getChildren() override;
+
+        uint64_t access(MemReq& req) override;
+        uint64_t invalidate(const InvReq& req) override;
 };
 
 #endif  // PREFETCHER_H_

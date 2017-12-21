@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -47,6 +48,7 @@ class PinCmd;
 class PortVirtualizer;
 class VectorCounter;
 class AccessTraceWriter;
+class YTTracer;  //Only used in zsim_trace due to experimental code
 class TraceDriver;
 template <typename T> class g_vector;
 
@@ -177,6 +179,7 @@ struct GlobSimInfo {
 
     // Trace writers (stored globally because they need to be deleted when the simulation ends)
     g_vector<AccessTraceWriter*>* traceWriters;
+    g_vector<YTTracer*>* YTtraceWriters;
 
     // Trace-driven simulation (no cores)
     bool traceDriven;

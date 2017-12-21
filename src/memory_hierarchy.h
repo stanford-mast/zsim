@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -76,6 +77,7 @@ inline bool IsPut(AccessType t) { return t == PUTS || t == PUTX; }
 
 /* Memory request */
 struct MemReq {
+    Address pc;
     Address lineAddr;
     AccessType type;
     uint32_t childId;
@@ -92,13 +94,19 @@ struct MemReq {
     //Flags propagate across levels, though not to evictions
     //Some other things that can be indicated here: Demand vs prefetch accesses, TLB accesses, etc.
     enum Flag {
-        IFETCH        = (1<<1), //For instruction fetches. Purely informative for now, does not imply NOEXCL (but ifetches should be marked NOEXCL)
-        NOEXCL        = (1<<2), //Do not give back E on a GETS request (turns MESI protocol into MSI for this line). Used on e.g., ifetches and NUCA.
-        NONINCLWB     = (1<<3), //This is a non-inclusive writeback. Do not assume that the line was in the lower level. Used on NUCA (BankDir).
-        PUTX_KEEPEXCL = (1<<4), //Non-relinquishing PUTX. On a PUTX, maintain the requestor's E state instead of removing the sharer (i.e., this is a pure writeback)
-        PREFETCH      = (1<<5), //Prefetch GETS access. Only set at level where prefetch is issued; handled early in MESICC
+        IFETCH              = (1<<1), //For instruction fetches. Purely informative for now, does not imply NOEXCL (but ifetches should be marked NOEXCL)
+        NOEXCL              = (1<<2), //Do not give back E on a GETS request (turns MESI protocol into MSI for this line). Used on e.g., ifetches and NUCA.
+        NONINCLWB           = (1<<3), //This is a non-inclusive writeback. Do not assume that the line was in the lower level. Used on NUCA (BankDir).
+        PUTX_KEEPEXCL       = (1<<4), //Non-relinquishing PUTX. On a PUTX, maintain the requestor's E state instead of removing the sharer (i.e., this is a pure writeback)
+        PREFETCH            = (1<<5), //Prefetch GETS access. Only set at level where prefetch is injected (then cleared); handled early in MESICC
+        SPECULATIVE         = (1<<6), //Indicates a speculative (non-demand) access (e.g., a prefetch) for stats and to prevent prefetch amplification
     };
     uint32_t flags;
+
+    //Prefetch skip flag (in contrast to the PREFETCH flag). Skips cache allocation until the value is 0.
+    //At that point PREFETCH is effectively set for the target cache insertion.
+    //Use with the 'SPECULATIVE' flag above to separate from demand accesses and to prevent additional reactive prefetches
+    uint32_t prefetch;
 
     inline void set(Flag f) {flags |= f;}
     inline bool is (Flag f) const {return flags & f;}
@@ -124,15 +132,18 @@ class MemObject : public GlobAlloc {
     public:
         //Returns response cycle
         virtual uint64_t access(MemReq& req) = 0;
-        virtual void initStats(AggregateStat* parentStat) {}
+        virtual void initStats(AggregateStat* parentStat) {};
         virtual const char* getName() = 0;
+        virtual void postInit() {};
 };
 
 /* Base class for all cache objects */
 class BaseCache : public MemObject {
     public:
         virtual void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network) = 0;
+        virtual g_vector<MemObject*>* getParents() = 0;
         virtual void setChildren(const g_vector<BaseCache*>& children, Network* network) = 0;
+        virtual g_vector<BaseCache*>* getChildren() = 0;
         virtual uint64_t invalidate(const InvReq& req) = 0;
 };
 

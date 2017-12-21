@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -47,8 +48,8 @@ void VirtGetcpu(uint32_t tid, uint32_t cpu, ADDRINT arg0, ADDRINT arg1) {
         return;
     }
 
-    trace(TimeVirt, "Patching getcpu()");
-    trace(TimeVirt, "Orig cpu %d, node %d, patching core %d / node 0", resCpu, resNode, cpu);
+    ZSIM_TRACE(TimeVirt, "Patching getcpu()");
+    ZSIM_TRACE(TimeVirt, "Orig cpu %d, node %d, patching core %d / node 0", resCpu, resNode, cpu);
     resCpu = cpu;
     resNode = 0;
 
@@ -60,7 +61,7 @@ PostPatchFn PatchGetcpu(PrePatchArgs args) {
     uint32_t cpu = cpuenumCpu(procIdx, getCid(args.tid));  // still valid, may become invalid when we leave()
     assert(cpu != (uint32_t)-1);
     return [cpu](PostPatchArgs args) {
-        trace(TimeVirt, "[%d] Post-patching SYS_getcpu", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_getcpu", tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
         VirtGetcpu(args.tid, cpu, arg0, arg1);
@@ -119,4 +120,3 @@ PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
         return PPA_USE_JOIN_PTRS;
     };
 }
-

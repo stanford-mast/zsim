@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -51,11 +52,13 @@
 #include "log.h"
 #include "mem_ctrls.h"
 #include "network.h"
+#include "next_line_prefetcher.h"
 #include "null_core.h"
 #include "ooo_core.h"
 #include "part_repl_policies.h"
 #include "pin_cmd.h"
 #include "prefetcher.h"
+#include "ghb_prefetcher.h"
 #include "proc_stats.h"
 #include "process_stats.h"
 #include "process_tree.h"
@@ -66,6 +69,7 @@
 #include "stats.h"
 #include "stats_filter.h"
 #include "str.h"
+#include "table_prefetcher.h"
 #include "timing_cache.h"
 #include "timing_core.h"
 #include "timing_event.h"
@@ -377,25 +381,118 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
 
     string prefix = "sys.caches." + name + ".";
 
-    bool isPrefetcher = config.get<bool>(prefix + "isPrefetcher", false);
-    if (isPrefetcher) { //build a prefetcher group
-        uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
-        cg.resize(prefetchers);
-        for (vector<BaseCache*>& bg : cg) bg.resize(1);
-        for (uint32_t i = 0; i < prefetchers; i++) {
-            stringstream ss;
-            ss << name << "-" << i;
-            g_string pfName(ss.str().c_str());
-            cg[i][0] = new StreamPrefetcher(pfName);
-        }
-        return cgp;
-    }
-
     uint32_t size = config.get<uint32_t>(prefix + "size", 64*1024);
     uint32_t banks = config.get<uint32_t>(prefix + "banks", 1);
     uint32_t caches = config.get<uint32_t>(prefix + "caches", 1);
 
+    assert(((banks > 0) && (size  > 0)));
+
     uint32_t bankSize = size/banks;
+
+    string prefetch_type = config.get<const char*>(prefix + "prefetcherType", "");
+    if (!prefetch_type.empty()) { //build a prefetcher group
+        if (prefetch_type.compare("Stride") == 0 ||
+            prefetch_type.compare("GHB") == 0) {
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            uint32_t streams = config.get<uint32_t>(prefix + "streams", 16);
+            uint32_t log_distance = config.get<uint32_t>(prefix + "log_distance", 6);
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 2);
+            if(streams <= 0) {
+                panic("Prefetcher requires at least one stream");
+            }
+            if(log_distance < 4 || log_distance > 31) {
+                panic("Prefetch log distance must be in between 4 and 31");
+            }
+            cg.resize(prefetchers);
+            for (vector<BaseCache*>& bg : cg) bg.resize(1);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << "-" << i;
+                g_string pfName(ss.str().c_str());
+                if (prefetch_type.compare("GHB") == 0) {
+                    uint32_t ghb_size;
+                    ghb_size = config.get<uint32_t>(prefix + "ghb_size", 1024);
+                    uint32_t index_size =
+                        config.get<uint32_t>(prefix + "index_size", 128);
+                    g_string target_cache =
+                        config.get<const char*>(prefix + "target", "");
+                    bool delta_correlat =
+                        config.get<bool>(prefix + "delta_correlation", false);
+                    bool monitor_GETS =
+                        config.get<bool>(prefix + "monitor_GETS", true);
+                    bool monitor_GETX =
+                        config.get<bool>(prefix + "monitor_GETX", true);
+                    cg[i][0] = new GhbPrefetcher(pfName, ghb_size,
+                                                 index_size, log_distance,
+                                                 degree, target_cache,
+                                                 delta_correlat, monitor_GETS,
+                                                 monitor_GETX);
+                }
+                else {
+                    if(!(degree > 0 && degree < 5)) {
+                        panic("Prefetch degree must be in between 1 and 4");
+                    }
+                    cg[i][0] = new StreamPrefetcher(pfName, streams,
+                                                    log_distance, degree);
+                }
+            }
+            return cgp;
+        } else if (prefetch_type.compare("Table") == 0) {
+            g_string table_file = config.get<const char*>(prefix + "table", "");
+            double conf_thresh = config.get<double>(prefix + "confidence", 0.0);
+            double prob_thresh = config.get<double>(prefix + "probability", 0.0);
+            bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
+            bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 1);
+            bool stride_detection = config.get<bool>(prefix + "strideDetection", false);
+            g_string target_cache = config.get<const char*>(prefix + "target", "");
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            if (table_file.empty()) {
+                panic("Table prefetcher requires a table input file");
+            }
+            if (conf_thresh < 0.0 || conf_thresh > 1.0) {
+                panic("Confidence threshold must be between 0 and 1");
+            }
+            if (prob_thresh < 0.0 || prob_thresh > 1.0) {
+                panic("Probability threshold must be between 0 and 1");
+            }
+            if (target_cache.empty()) {
+                panic("Unspecified target cache for prefetcher '%s'", name.c_str());
+            }
+            cg.resize(prefetchers);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << '-' << i;
+                g_string full_name(ss.str().c_str());
+                cg[i].emplace_back(new TablePrefetcher(full_name, target_cache, monitor_loads, monitor_stores,
+                                                       table_file, conf_thresh, prob_thresh, degree, stride_detection));
+            }
+            return cgp;
+        } else if (prefetch_type.compare("Nextline") == 0) {
+            bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
+            bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 0);
+            g_string target_cache = config.get<const char*>(prefix + "target", "");
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            if (target_cache.empty()) {
+                panic("Unspecified target cache for prefetcher '%s'", name.c_str());
+            }
+            cg.resize(prefetchers);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << '-' << i;
+                g_string full_name(ss.str().c_str());
+                cg[i].emplace_back(new NextLinePrefetcher(full_name,
+                                                          target_cache,
+                                                          monitor_loads,
+                                                          monitor_stores,
+                                                          degree));
+            }
+            return cgp;
+        } else {
+            panic("Unknown prefetcher type '%s'", prefetch_type.c_str());
+        }
+    }
     if (size % banks != 0) {
         panic("%s: banks (%d) does not divide the size (%d bytes)", name.c_str(), banks, size);
     }
@@ -625,6 +722,12 @@ static void InitSystem(Config& config) {
             string prefix = string("sys.cores.") + group + ".";
             uint32_t cores = config.get<uint32_t>(prefix + "cores", 1);
             string type = config.get<const char*>(prefix + "type", "Simple");
+            string prefixc = prefix + "properties.";
+            uint32_t bp_nb = config.get<uint32_t>(prefixc + "bp_nb", 11);
+            uint32_t bp_hb = config.get<uint32_t>(prefixc + "bp_hb", 18);
+            uint32_t bp_lb = config.get<uint32_t>(prefixc + "bp_lb", 14);
+
+            CoreProperties *core_properties = new CoreProperties(bp_nb, bp_hb, bp_lb);
 
             //Build the core group
             union {
@@ -670,6 +773,7 @@ static void InitSystem(Config& config) {
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
+                    ic->setType(FilterCache::Type::I);
                     assignedCaches[icache]++;
 
                     if (assignedCaches[dcache] >= dgroup.size()) {
@@ -678,6 +782,7 @@ static void InitSystem(Config& config) {
                     FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
                     assert(dc);
                     dc->setSourceId(coreIdx);
+                    dc->setType(FilterCache::Type::D);
                     assignedCaches[dcache]++;
 
                     //Build the core
@@ -691,7 +796,7 @@ static void InitSystem(Config& config) {
                         core = tcore;
                     } else {
                         assert(type == "OOO");
-                        OOOCore* ocore = new (&oooCores[j]) OOOCore(ic, dc, name);
+                        OOOCore* ocore = new (&oooCores[j]) OOOCore(ic, dc, name, core_properties);
                         zinfo->eventRecorders[coreIdx] = ocore->getEventRecorder();
                         zinfo->eventRecorders[coreIdx]->setSourceId(coreIdx);
                         core = ocore;
@@ -753,6 +858,16 @@ static void InitSystem(Config& config) {
                 config.get<bool>("sim.playPuts", true),
                 config.get<bool>("sim.playAllGets", true));
         zinfo->traceDriver->initStats(zinfo->rootStat);
+    }
+
+    //Call postInit() on every cache. For most caches this will do nothing, but some may wish to take some action that
+    //is only available at this point, such as traversing the memory hierarchy.
+    for (auto& group_pair : cMap) {
+        for (auto& bank_vector : *(group_pair.second)) {
+            for (BaseCache* cache : bank_vector) {
+                cache->postInit();
+            }
+        }
     }
 
     //Init stats: caches, mem
@@ -1012,6 +1127,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     config.get<uint32_t>("sim.gmMBytes", (1 << 10));
     if (!zinfo->attachDebugger) config.get<bool>("sim.deadlockDetection", true);
     config.get<bool>("sim.aslr", false);
+    config.get<const char*>("sim.outputDir", nullptr);
 
     //Write config out
     bool strictConfig = config.get<bool>("sim.strictConfig", true); //if true, panic on unused variables
@@ -1024,4 +1140,3 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     //Causes every other process to wake up
     gm_set_glob_ptr(zinfo);
 }
-

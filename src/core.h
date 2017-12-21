@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -34,20 +35,31 @@
 struct BblInfo {
     uint32_t instrs;
     uint32_t bytes;
-    DynBbl oooBbl[0]; //0 bytes, but will be 1-sized when we have an element (and that element has variable size as well)
+    bool preserve; // Whether or not to delete oooBbl after it is used
+    DynBbl oooBbl[0]; // 0 bytes, but will be 1-sized when we have an element (and that element has variable size as well)
+};
+
+struct CoreProperties {
+    // Branch Predictor Properties, see ooo_core.h
+    uint32_t bp_nb; // L1 predictor nr entries
+    uint32_t bp_hb; // History bits
+    uint32_t bp_lb; // L2 predictor nr entries
+
+    CoreProperties (uint32_t _bp_nb, uint32_t _bp_hb, uint32_t _bp_lb) :
+        bp_nb(_bp_nb), bp_hb(_bp_hb), bp_lb(_bp_lb) {};
 };
 
 /* Analysis function pointer struct
  * As an artifact of having a shared code cache, we need these to be the same for different core types.
  */
 struct InstrFuncPtrs {  // NOLINT(whitespace)
-    void (*loadPtr)(THREADID, ADDRINT);
-    void (*storePtr)(THREADID, ADDRINT);
+    void (*loadPtr)(THREADID, ADDRINT, ADDRINT);  //TID, Addr, PC
+    void (*storePtr)(THREADID, ADDRINT, ADDRINT);  //TID, Addr, PC
     void (*bblPtr)(THREADID, ADDRINT, BblInfo*);
     void (*branchPtr)(THREADID, ADDRINT, BOOL, ADDRINT, ADDRINT);
     // Same as load/store functions, but last arg indicated whether op is executing
-    void (*predLoadPtr)(THREADID, ADDRINT, BOOL);
-    void (*predStorePtr)(THREADID, ADDRINT, BOOL);
+    void (*predLoadPtr)(THREADID, ADDRINT, ADDRINT, BOOL);  //TID, Addr, PC, executing
+    void (*predStorePtr)(THREADID, ADDRINT, ADDRINT, BOOL);  //TID, Addr, PC, executing
     uint64_t type;
     uint64_t pad[1];
     //NOTE: By having the struct be a power of 2 bytes, indirect calls are simpler (w/ gcc 4.4 -O3, 6->5 instructions, and those instructions are simpler)
@@ -88,4 +100,3 @@ class Core : public GlobAlloc {
 };
 
 #endif  // CORE_H_
-

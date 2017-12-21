@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -43,6 +44,8 @@
 #include "process_stats.h"
 #include "stats.h"
 #include "zsim.h"
+#include "virt/interval_timer.h"
+#include "virt/syscall_name.h"
 
 /**
  * TODO (dsm): This class is due for a heavy pass or rewrite. Some things are more complex than they should:
@@ -135,6 +138,7 @@ class Scheduler : public GlobAlloc, public Callee {
         };
 
         g_unordered_map<uint32_t, ThreadInfo*> gidMap;
+        g_unordered_map<uint64_t, ThreadInfo*> fidMap; //fiberID -> threadInfo
         g_vector<ContextInfo> contexts;
 
         InList<ContextInfo> freeList;
@@ -145,6 +149,10 @@ class Scheduler : public GlobAlloc, public Callee {
 
         PAD();
         lock_t schedLock;
+        PAD();
+
+        PAD();
+        lock_t gidMapLock;
         PAD();
 
         uint64_t curPhase;
@@ -169,7 +177,7 @@ class Scheduler : public GlobAlloc, public Callee {
 
     public:
         Scheduler(void (*_atSyncFunc)(void), uint32_t _parallelThreads, uint32_t _numCores, uint32_t _schedQuantum) :
-            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134)
+            atSyncFunc(_atSyncFunc), bar(_parallelThreads, this), numCores(_numCores), schedQuantum(_schedQuantum), rnd(0x5C73D9134), intervalTimer((uint32_t)zinfo->lineSize)
         {
             contexts.resize(numCores);
             for (uint32_t i = 0; i < numCores; i++) {
@@ -179,6 +187,7 @@ class Scheduler : public GlobAlloc, public Callee {
                 freeList.push_back(&contexts[i]);
             }
             schedLock = 0;
+            gidMapLock = 0;
             //nextVictim = 0; //only used when freeList is empty.
             curPhase = 0;
             scheduledThreads = 0;
@@ -215,14 +224,20 @@ class Scheduler : public GlobAlloc, public Callee {
         void start(uint32_t pid, uint32_t tid, const g_vector<bool>& mask) {
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
+            uint64_t fid;
+            syscall(SYS_google_syscall_get_gtid, &fid);
             //info("[G %d] Start", gid);
             assert((gidMap.find(gid) == gidMap.end()));
+            assert((fidMap.find(fid) == fidMap.end()));
             // Get pid and tid straight from the OS
             // - SYS_gettid because glibc does not implement gettid()
             // - SYS_getpid because after a fork (where zsim calls ThreadStart),
             //   getpid() returns the parent's pid (getpid() caches, and I'm
             //   guessing it hasn't flushed its cached pid at this point)
+            futex_lock(&gidMapLock);
             gidMap[gid] = new ThreadInfo(gid, syscall(SYS_getpid), syscall(SYS_gettid), mask);
+            fidMap[fid] = gidMap[gid];
+            futex_unlock(&gidMapLock);
             threadsCreated.inc();
             futex_unlock(&schedLock);
         }
@@ -233,7 +248,16 @@ class Scheduler : public GlobAlloc, public Callee {
             //info("[G %d] Finish", gid);
             assert((gidMap.find(gid) != gidMap.end()));
             ThreadInfo* th = gidMap[gid];
+            futex_lock(&gidMapLock);
             gidMap.erase(gid);
+            futex_unlock(&gidMapLock);
+
+            //Thread might have executed epoll with a timeout and hence sleeping
+            if (th->state == SLEEPING) {
+                futex_unlock(&schedLock); //FIXME: May be racey...
+                notifySleepEnd(pid, tid); //needs gidMap to be valid
+                futex_lock(&schedLock);
+            }
 
             // Check for suppressed syscall leave(), execute it
             if (th->fakeLeave) {
@@ -259,11 +283,13 @@ class Scheduler : public GlobAlloc, public Callee {
                 assert(th->owner == &outQueue);
                 outQueue.remove(th);
                 ContextInfo* ctx = &contexts[th->cid];
-                deschedule(th, ctx, BLOCKED);
-                freeList.push_back(ctx);
-                //no need to try to schedule anything; this context was already being considered while in outQueue
-                //assert(runQueue.empty()); need not be the case with masks
-                //info("[G %d] Removed from outQueue and descheduled", gid);
+                // descheduling finishing thread on the condition that it has been scheduled
+                if (ctx->curThread == th) {
+                    deschedule(th, ctx, BLOCKED);
+                    freeList.push_back(ctx);
+                    //no need to try to schedule anything; this context was already being considered while in outQueue
+                    //assert(runQueue.empty()); need not be the case with masks
+                }
             }
             //At this point noone holds pointer to th, it's out from all queues, and either on OUT or BLOCKED means it's not pending a handoff
             delete th;
@@ -327,7 +353,7 @@ class Scheduler : public GlobAlloc, public Callee {
             return th->cid;
         }
 
-        void leave(uint32_t pid, uint32_t tid, uint32_t cid) {
+    void leave(uint32_t pid, uint32_t tid, uint32_t cid, ThreadInfo *switchto = NULL) {
             futex_lock(&schedLock);
             //Just call bar.leave
             uint32_t gid = getGid(pid, tid);
@@ -337,7 +363,7 @@ class Scheduler : public GlobAlloc, public Callee {
             zinfo->cores[cid]->leave();
 
             if (th->markedForSleep) { //transition to SLEEPING, eagerly deschedule
-                trace(Sched, "Sched: %d going to SLEEP, wakeup on phase %ld", gid, th->wakeupPhase);
+                ZSIM_TRACE(Sched, "Sched: %d going to SLEEP, wakeup on phase %ld", gid, th->wakeupPhase);
                 th->markedForSleep = false;
                 ContextInfo* ctx = &contexts[cid];
                 deschedule(th, ctx, SLEEPING);
@@ -350,12 +376,15 @@ class Scheduler : public GlobAlloc, public Callee {
                     while (cur->next && cur->next->wakeupPhase <= th->wakeupPhase) {
                         cur = cur->next;
                     }
-                    trace(Sched, "Put %d in sleepQueue (deadline %ld), after %d (deadline %ld)", gid, th->wakeupPhase, cur->gid, cur->wakeupPhase);
+                    ZSIM_TRACE(Sched, "Put %d in sleepQueue (deadline %ld), after %d (deadline %ld)", gid, th->wakeupPhase, cur->gid, cur->wakeupPhase);
                     sleepQueue.insertAfter(cur, th);
                 }
                 sleepEvents.inc();
 
                 ThreadInfo* inTh = schedContext(ctx);
+                if (switchto) {
+                    assert(switchto == inTh);
+                }
                 if (inTh) {
                     schedule(inTh, ctx);
                     zinfo->cores[ctx->cid]->join(); //inTh does not do a sched->join, so we need to notify the core since we just called leave() on it
@@ -367,6 +396,10 @@ class Scheduler : public GlobAlloc, public Callee {
             } else { //lazily transition to OUT, where we retain our context
                 ContextInfo* ctx = &contexts[cid];
                 ThreadInfo* inTh = schedContext(ctx);
+                if (switchto) {
+                    assert(switchto == inTh);
+                }
+
                 if (inTh) { //transition to BLOCKED, sched inTh
                     deschedule(th, ctx, BLOCKED);
                     schedule(inTh, ctx);
@@ -440,12 +473,15 @@ class Scheduler : public GlobAlloc, public Callee {
 
             assert(curPhase == zinfo->numPhases); //check they don't skew
 
+            //Interal timer ticks at the end of each phase
+            intervalTimer.phaseTick();
+
             //Wake up all sleeping threads where deadline is met
             if (!sleepQueue.empty()) {
                 ThreadInfo* th = sleepQueue.front();
                 while (th && th->wakeupPhase <= curPhase) {
                     assert(th->wakeupPhase == curPhase);
-                    trace(Sched, "%d SLEEPING -> BLOCKED, waking up from timeout syscall (curPhase %ld, wakeupPhase %ld)", th->gid, curPhase, th->wakeupPhase);
+                    ZSIM_TRACE(Sched, "%d SLEEPING -> BLOCKED, waking up from timeout syscall (curPhase %ld, wakeupPhase %ld)", th->gid, curPhase, th->wakeupPhase);
 
                     // Try to deschedule ourselves
                     th->state = BLOCKED;
@@ -467,7 +503,7 @@ class Scheduler : public GlobAlloc, public Callee {
         volatile uint32_t* markForSleep(uint32_t pid, uint32_t tid, uint64_t wakeupPhase) {
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
-            trace(Sched, "%d marking for sleep", gid);
+            ZSIM_TRACE(Sched, "%d marking for sleep", gid);
             ThreadInfo* th = gidMap[gid];
             assert(!th->markedForSleep);
             th->markedForSleep = true;
@@ -478,11 +514,11 @@ class Scheduler : public GlobAlloc, public Callee {
         }
 
         bool isSleeping(uint32_t pid, uint32_t tid) {
-            futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
+            futex_lock(&gidMapLock);
             ThreadInfo* th = gidMap[gid];
+            futex_unlock(&gidMapLock);
             bool res = th->state == SLEEPING;
-            futex_unlock(&schedLock);
             return res;
         }
 
@@ -555,49 +591,52 @@ class Scheduler : public GlobAlloc, public Callee {
 
         uint32_t getScheduledPid(uint32_t cid) const { return (contexts[cid].state == USED)? getPid(contexts[cid].curThread->gid) : (uint32_t)-1; }
 
-        const g_vector<bool> getMask(uint32_t pid, uint32_t tid) {
-            g_vector<bool> mask;
-            futex_lock(&schedLock);
-            uint32_t gid = getGid(pid, tid);
-            if(gidMap.find(gid) == gidMap.end()) {
-                futex_unlock(&schedLock);
-                warn("Scheduler::getMask(): can't find thread info pid=%d, tid=%d", pid, tid);
-                mask.resize(zinfo->numCores, true);
-                return mask;
-            }
-            ThreadInfo* th = gidMap[gid];
-            mask = th->mask;
+    const g_vector<bool> getMask(uint32_t pid, uint32_t tid) {
+        g_vector<bool> mask;
+        futex_lock(&schedLock);
+        uint32_t gid = getGid(pid, tid);
+        if(gidMap.find(gid) == gidMap.end()) {
             futex_unlock(&schedLock);
+            warn("Scheduler::getMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+            mask.resize(zinfo->numCores, true);
             return mask;
         }
+        ThreadInfo* th = gidMap[gid];
+        mask = th->mask;
+        futex_unlock(&schedLock);
+        return mask;
+    }
 
-        void updateMask(uint32_t pid, uint32_t tid, const g_vector<bool>& mask) {
-            futex_lock(&schedLock);
-            uint32_t gid = getGid(pid, tid);
-            if(gidMap.find(gid) == gidMap.end()) {
-                futex_unlock(&schedLock);
-                warn("Scheduler::updateMask(): can't find thread info pid=%d, tid=%d", pid, tid);
-                return;
-            }
-            ThreadInfo* th = gidMap[gid];
-            //info("Scheduler::updateMask(): update thread mask pid=%d, tid=%d", pid, tid);
-            assert(mask.size() == zinfo->numCores);
-            uint32_t count = 0;
-            for (auto b : mask) if (b) count++;
-            if (count == 0) panic("Empty mask on gid %d!", gid);
-            th->mask = mask;
+    void updateMask(uint32_t pid, uint32_t tid, const g_vector<bool>& mask) {
+        futex_lock(&schedLock);
+        uint32_t gid = getGid(pid, tid);
+        if(gidMap.find(gid) == gidMap.end()) {
             futex_unlock(&schedLock);
-            // Do leave and join outside to clear and set cid in zsim.cpp
+            warn("Scheduler::updateMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+            return;
         }
+        ThreadInfo* th = gidMap[gid];
+        //info("Scheduler::updateMask(): update thread mask pid=%d, tid=%d", pid, tid);
+        assert(mask.size() == zinfo->numCores);
+        uint32_t count = 0;
+        for (auto b : mask) if (b) count++;
+        if (count == 0) panic("Empty mask on gid %d!", gid);
+        th->mask = mask;
+        futex_unlock(&schedLock);
+        // Do leave and join outside to clear and set cid in zsim.cpp
+    }
 
-        uint32_t getTidFromLinuxTid(uint32_t linuxTid) {
-            for (const auto& kv : gidMap) {
-                if (kv.second->linuxTid == linuxTid) {
-                    return getTid(kv.first);
-                }
+    uint32_t getTidFromLinuxTid(uint32_t linuxTid) {
+        for (const auto& kv : gidMap) {
+            if (kv.second->linuxTid == linuxTid) {
+                return getTid(kv.first);
             }
-            return -1;
         }
+        return -1;
+    }
+
+        //Interval timer for alarm() and get/setitimer()
+        IntervalTimer intervalTimer;
 
     private:
         void schedule(ThreadInfo* th, ContextInfo* ctx) {
@@ -647,12 +686,13 @@ class Scheduler : public GlobAlloc, public Callee {
             // So we should get the lock regardless of needsJoin.
             futex_lock(&schedLock);
             if (th->needsJoin) {
-                //assert(th->needsJoin); //re-check after the lock
                 zinfo->cores[th->cid]->join();
+                //bar.join() releases schedlock
                 bar.join(th->cid, &schedLock);
                 //info("%d join done", th->gid);
             }
-            futex_unlock(&schedLock);
+            else
+                futex_unlock(&schedLock);
         }
 
         void wakeup(ThreadInfo* th, bool needsJoin) {

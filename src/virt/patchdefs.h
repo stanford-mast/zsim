@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -51,10 +52,12 @@ PF(SYS_time, PatchTime);
 PF(SYS_clock_gettime, PatchClockGettime);
 PF(SYS_nanosleep, PatchNanosleep);
 PF(SYS_clock_nanosleep, PatchNanosleep);
+PF(SYS_alarm, PatchAlarmSyscall);
+PF(SYS_getitimer, PatchGetitimerSyscall);
+PF(SYS_setitimer, PatchSetitimerSyscall);
 
 // Timeout virtualization -- timeout.cpp
 PF(SYS_futex, PatchTimeoutSyscall);
 PF(SYS_epoll_wait, PatchTimeoutSyscall);
 PF(SYS_epoll_pwait, PatchTimeoutSyscall);
 PF(SYS_poll, PatchTimeoutSyscall);
-

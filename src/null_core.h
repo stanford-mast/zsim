@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -53,14 +54,13 @@ class NullCore : public Core {
     protected:
         inline void bbl(BblInfo* bblInstrs);
 
-        static void LoadFunc(THREADID tid, ADDRINT addr);
-        static void StoreFunc(THREADID tid, ADDRINT addr);
+        static void LoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
+        static void StoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc);
         static void BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo);
-        static void PredLoadFunc(THREADID tid, ADDRINT addr, BOOL pred);
-        static void PredStoreFunc(THREADID tid, ADDRINT addr, BOOL pred);
+        static void PredLoadFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
+        static void PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT pc, BOOL pred);
 
         static void BranchFunc(THREADID, ADDRINT, BOOL, ADDRINT, ADDRINT) {}
 } ATTR_LINE_ALIGNED; //This needs to take up a whole cache line, or false sharing will be extremely frequent
 
 #endif  // NULL_CORE_H_
-

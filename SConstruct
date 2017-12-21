@@ -4,6 +4,8 @@ from os.path import join as joinpath
 useIcc = False
 #useIcc = True
 
+TRACE = True
+
 def buildSim(cppFlags, dir, type, pgo=None):
     ''' Build the simulator with a specific base buid dir and config type'''
 
@@ -34,6 +36,20 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env['CXX'] = 'icpc -ipo'
 
     # Required paths
+    if "XEDPATH" in os.environ:
+        XEDPATH = os.environ["XEDPATH"]
+    else:
+       print "ERROR: You need to define the $XEDPATH environment variable with Xed's path"
+       sys.exit(1)
+
+    # Required paths
+    if "DRIOPATH" in os.environ:
+        DRIOPATH = os.environ["DRIOPATH"]
+    else:
+       print "ERROR: You need to define the $DRIOPATH environment variable with Xed's path"
+       sys.exit(1)
+
+    # Required paths
     if "PINPATH" in os.environ:
         PINPATH = os.environ["PINPATH"]
     else:
@@ -56,19 +72,31 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # Pin 2.12+ kits have changed the layout of includes, detect whether we need
     # source/include/ or source/include/pin/
     pinInclDir = joinpath(PINPATH, "source/include/")
-    if not os.path.exists(joinpath(pinInclDir, "pin.H")):
-        pinInclDir = joinpath(pinInclDir, "pin")
-        assert os.path.exists(joinpath(pinInclDir, "pin.H"))
+    if not TRACE:
+        if not os.path.exists(joinpath(pinInclDir, "pin.H")):
+    	    pinInclDir = joinpath(pinInclDir, "pin")
+            assert os.path.exists(joinpath(pinInclDir, "pin.H"))
 
     # Pin 2.14 changes location of XED
     xedName = "xed2"  # used below
-    xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
+    if TRACE:
+       xedPath = joinpath(XEDPATH, "include/")
+       xedBuildPath = joinpath(XEDPATH, "obj/")
+       xedPublicPath = joinpath(XEDPATH, "include/public/xed/")
+       drPath = joinpath(DRIOPATH, "clients/drcachesim/")
+       drCommonPath = joinpath(drPath, "common/")
+       drReaderPath = joinpath(drPath, "reader/")
+    else:
+	xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
+	drPATH = ""
+	drCommonPath = ""
     if not os.path.exists(xedPath):
         xedName = "xed"
         xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
         assert os.path.exists(xedPath)
 
-    env["CPPPATH"] = [xedPath,
+
+    env["CPPPATH"] = [xedPath, xedBuildPath, xedPublicPath, drPath, drCommonPath, drReaderPath,
             pinInclDir, joinpath(pinInclDir, "gen"),
             joinpath(PINPATH, "extras/components/include")]
 
@@ -93,9 +121,12 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # systems, Pin's libelf takes precedence over the system's, but it does not
     # include symbols that we need or it's a different variant (we need
     # libelfg0-dev in Ubuntu systems)
-    env["PINLIBPATH"] = ["/usr/lib", "/usr/lib/x86_64-linux-gnu", joinpath(PINPATH, "extras/" + xedName + "-intel64/lib"),
+    if not TRACE:
+        env["PINLIBPATH"] = ["/usr/lib", "/usr/lib/x86_64-linux-gnu", joinpath(PINPATH, "extras/" + xedName + "-intel64/lib"),
             joinpath(PINPATH, "intel64/lib"), joinpath(PINPATH, "intel64/lib-ext")]
-
+    else:
+        env["PINLIBPATH"] = ["/usr/lib", "/usr/lib/x86_64-linux-gnu", joinpath(XEDPATH, "kits/xed-install-base-2017-07-18-lin-x86-64/lib")]
+	
     # Libdwarf is provided in static and shared variants, Ubuntu only provides
     # static, and I don't want to add -R<pin path/intel64/lib-ext> because
     # there are some other old libraries provided there (e.g., libelf) and I
@@ -108,7 +139,10 @@ def buildSim(cppFlags, dir, type, pgo=None):
     if not os.path.exists(pindwarfPath):
         pindwarfLib = "pindwarf"
 
-    env["PINLIBS"] = ["pin", "xed", pindwarfLib, "elf", "dl", "rt"]
+    if not TRACE:
+       env["PINLIBS"] = ["xed", pindwarfLib, "elf", "dl", "rt"]
+    else:
+       env["PINLIBS"] = ["pin", "xed", pindwarfLib, "elf", "dl", "rt"]
 
     # Non-pintool libraries
     env["LIBPATH"] = []
@@ -162,6 +196,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
     env["CPPFLAGS"] += ' -DPIN_PATH="' + joinpath(PINPATH, "intel64/bin/pinbin") + '" '
     env["CPPFLAGS"] += ' -DZSIM_PATH="' + joinpath(ROOT, joinpath(buildDir, "libzsim.so")) + '" '
 
+    env["CPPFLAGS"] += ' -DTRACE_BASED=1'
+
     # Do PGO?
     if pgo == "generate":
         genFlags = " -prof-gen " if useIcc else " -fprofile-generate "
@@ -173,9 +209,9 @@ def buildSim(cppFlags, dir, type, pgo=None):
         # even single-threaded sims use internal threads, so we need correction
         env["PINCPPFLAGS"] += useFlags
         env["PINLINKFLAGS"] += useFlags
-
+    
     env.SConscript("src/SConscript", variant_dir=buildDir, exports= {'env' : env.Clone()})
-
+    
 ####
 
 AddOption('--buildDir', dest='buildDir', type='string', default="build/", nargs=1, action='store', metavar='DIR', help='Base build directory')

@@ -1,4 +1,5 @@
 /** $glic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  * Copyright (C) 2011 Google Inc.
@@ -41,19 +42,19 @@ static bool SkipTimeVirt(PrePatchArgs args) {
 // General virtualization functions, used for both syscall and vsyscall/vdso virtualization
 
 void VirtGettimeofday(uint32_t tid, ADDRINT arg0) {
-    trace(TimeVirt, "[%d] Post-patching gettimeofday", tid);
+    ZSIM_TRACE(TimeVirt, "[%d] Post-patching gettimeofday", tid);
     if (arg0) {
         struct timeval tv;
         if (!safeCopy((struct timeval*) arg0, &tv)) {
             info("Failed read of gettimeofday() input");
             return;
         }
-        trace(TimeVirt, "Orig %ld sec, %ld usec", tv.tv_sec, tv.tv_usec);
+        ZSIM_TRACE(TimeVirt, "Orig %ld sec, %ld usec", tv.tv_sec, tv.tv_usec);
         uint64_t simNs = cyclesToNs(zinfo->globPhaseCycles);
         uint32_t domain = zinfo->procArray[procIdx]->getClockDomain();
         tv = nsToTimeval(zinfo->clockDomainInfo[domain].realtimeOffsetNs + simNs);
 
-        trace(TimeVirt, " Patched %ld sec, %ld usec", tv.tv_sec, tv.tv_usec);
+        ZSIM_TRACE(TimeVirt, " Patched %ld sec, %ld usec", tv.tv_sec, tv.tv_usec);
         if (!safeCopy(&tv, (struct timeval*) arg0)) {
             info("Failed write of gettimeofday() output");
         }
@@ -71,7 +72,7 @@ void VirtTime(uint32_t tid, REG* out, ADDRINT arg0) {
     uint32_t domain = zinfo->procArray[procIdx]->getClockDomain();
     time_t tm = (zinfo->clockDomainInfo[domain].realtimeOffsetNs + simNs)/NSPS;
 
-    trace(TimeVirt, "[%d] Post-patching time(), orig %ld, new %ld", tid, (time_t)*out, tm);
+    ZSIM_TRACE(TimeVirt, "[%d] Post-patching time(), orig %ld, new %ld", tid, (time_t)*out, tm);
     *out = (REG)tm;
     if (arg0) {
         if (!safeCopy(&tm, (time_t*) arg0)) {
@@ -109,21 +110,21 @@ void VirtClockGettime(uint32_t tid, ADDRINT arg0, ADDRINT arg1) {
             return;
         }
 
-        trace(TimeVirt, "Patching clock_gettime()");
-        trace(TimeVirt, "Orig %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "Patching clock_gettime()");
+        ZSIM_TRACE(TimeVirt, "Orig %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
 
         clock_gettime(CLOCK_MONOTONIC, &ts);
-        trace(TimeVirt, "MONOTONIC %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "MONOTONIC %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
         clock_gettime(CLOCK_REALTIME, &ts);
-        trace(TimeVirt, "REALTIME %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "REALTIME %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
-        trace(TimeVirt, "PROCESS_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "PROCESS_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
         clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-        trace(TimeVirt, "THREAD_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "THREAD_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
 
         uint64_t simNs = cyclesToNs(zinfo->globPhaseCycles);
         ts = nsToTimespec(offset + simNs);
-        trace(TimeVirt, "Patched %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
+        ZSIM_TRACE(TimeVirt, "Patched %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
 
         if (!safeCopy(&ts, (struct timespec*) arg1)) {
             info("Failed write of gettimeofday() output");
@@ -136,7 +137,7 @@ void VirtClockGettime(uint32_t tid, ADDRINT arg0, ADDRINT arg1) {
 PostPatchFn PatchGettimeofday(PrePatchArgs args) {
     if (SkipTimeVirt(args)) return NullPostPatch;
     return [](PostPatchArgs args) {
-        trace(TimeVirt, "[%d] Post-patching SYS_gettimeofday", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_gettimeofday", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         VirtGettimeofday(args.tid, arg0);
         return PPA_NOTHING;
@@ -146,7 +147,7 @@ PostPatchFn PatchGettimeofday(PrePatchArgs args) {
 PostPatchFn PatchTime(PrePatchArgs args) {
     if (SkipTimeVirt(args)) return NullPostPatch;
     return [](PostPatchArgs args) {
-        trace(TimeVirt, "[%d] Post-patching SYS_time", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_time", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         REG out = (REG)PIN_GetSyscallNumber(args.ctxt, args.std);
         VirtTime(args.tid, &out, arg0);
@@ -158,7 +159,7 @@ PostPatchFn PatchTime(PrePatchArgs args) {
 PostPatchFn PatchClockGettime(PrePatchArgs args) {
     if (SkipTimeVirt(args)) return NullPostPatch;
     return [](PostPatchArgs args) {
-        trace(TimeVirt, "[%d] Post-patching SYS_clock_gettime", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_clock_gettime", args.tid);
         ADDRINT arg0 = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         ADDRINT arg1 = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
         VirtClockGettime(args.tid, arg0, arg1);
@@ -180,17 +181,17 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
     struct timespec* ts;
     uint64_t offsetNsec = 0;
     if (isClock) {
-        trace(TimeVirt, "[%d] Pre-patching SYS_clock_nanosleep", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Pre-patching SYS_clock_nanosleep", tid);
         int flags = (int) PIN_GetSyscallArgument(ctxt, std, 1);
         ts = (struct timespec*) PIN_GetSyscallArgument(ctxt, std, 2);
         if (flags == TIMER_ABSTIME) {
-            trace(TimeVirt, "[%d] SYS_clock_nanosleep requests TIMER_ABSTIME, offsetting", args.tid);
+            ZSIM_TRACE(TimeVirt, "[%d] SYS_clock_nanosleep requests TIMER_ABSTIME, offsetting", tid);
             uint32_t domain = zinfo->procArray[procIdx]->getClockDomain();
             uint64_t simNs = cyclesToNs(zinfo->globPhaseCycles);
             offsetNsec = simNs + zinfo->clockDomainInfo[domain].realtimeOffsetNs;
         }
     } else {
-        trace(TimeVirt, "[%d] Pre-patching SYS_nanosleep", args.tid);
+        ZSIM_TRACE(TimeVirt, "[%d] Pre-patching SYS_nanosleep", tid);
         ts = (struct timespec*) PIN_GetSyscallArgument(ctxt, std, 0);
     }
 
@@ -228,19 +229,19 @@ PostPatchFn PatchNanosleep(PrePatchArgs args) {
         SYSCALL_STANDARD std = args.std;
 
         if (isClock) {
-            trace(TimeVirt, "[%d] Post-patching SYS_clock_nanosleep", args.tid);
+            ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_clock_nanosleep", tid);
         } else {
-            trace(TimeVirt, "[%d] Post-patching SYS_nanosleep", args.tid);
+            ZSIM_TRACE(TimeVirt, "[%d] Post-patching SYS_nanosleep", tid);
         }
 
         int res = (int)(-PIN_GetSyscallNumber(ctxt, std));
         if (res == EWOULDBLOCK) {
-            trace(TimeVirt, "Fixing EWOULDBLOCK --> 0");
+            ZSIM_TRACE(TimeVirt, "Fixing EWOULDBLOCK --> 0");
             PIN_SetSyscallNumber(ctxt, std, 0);  // this is fine, you just called a very very short sleep
         } else if (res == EINTR) {
             PIN_SetSyscallNumber(ctxt, std, -EINTR);  // we got an interrupt
         } else {
-            trace(TimeVirt, "%d", res);
+            ZSIM_TRACE(TimeVirt, "%d", res);
             assert(res == 0);
         }
 
@@ -307,3 +308,89 @@ uint64_t VirtGetPhaseRDTSC() {
     return zinfo->clockDomainInfo[domain].rdtscOffset + zinfo->globPhaseCycles;
 }
 
+// SYS_alarm
+
+PostPatchFn PatchAlarmSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_alarm);
+    ZSIM_TRACE(TimeVirt, "Patching SYS_alarm");
+    unsigned int secs = (unsigned int) PIN_GetSyscallArgument(ctxt, std, 0);
+    unsigned int secsRemain = zinfo->sched->intervalTimer.setAlarm(getpid(), secs);
+
+    //Turn this into a NOP by setting the argument to 0 (clears old timers)
+    PIN_SetSyscallArgument(ctxt, std, 0, 0);
+
+    //Postpatch to restore the arg and set the return value
+    return [secs, secsRemain](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Restore pre-call argument
+        PIN_SetSyscallArgument(ctxt, std, 0, secs);
+
+        //Set the return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = secsRemain;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_getitimer
+
+PostPatchFn PatchGetitimerSyscall(PrePatchArgs args) {
+    return NullPostPatch;
+}
+
+// SYS_setitimer
+
+PostPatchFn PatchSetitimerSyscall(PrePatchArgs args) {
+    if (SkipTimeVirt(args)) return NullPostPatch;
+
+    CONTEXT* ctxt = args.ctxt;
+    SYSCALL_STANDARD std = args.std;
+    uint32_t syscall = PIN_GetSyscallNumber(ctxt, std);
+    assert(syscall == SYS_setitimer);
+    ZSIM_TRACE(TimeVirt, "Patching SYS_setitimer");
+
+    //Grab new and old itimerval args
+    ADDRINT arg0 = PIN_GetSyscallArgument(ctxt, std, 0);
+    ADDRINT arg1 = PIN_GetSyscallArgument(ctxt, std, 1);
+    struct itimerval* newVal = new struct itimerval();
+    PIN_SafeCopy(newVal, (void *)arg1, sizeof(struct itimerval));
+    struct itimerval* oldVal = new struct itimerval();
+    int res = zinfo->sched->intervalTimer.setIntervalTimer(getpid(), (int)arg0, newVal, oldVal);
+
+    //Turn this into a NOP by disabling the timer
+    memset(newVal, 0, sizeof(struct itimerval));
+    PIN_SetSyscallArgument(ctxt, std, 1, (ADDRINT)newVal);
+
+    //Postpatch to set newVal, oldVal and the return value
+    return [arg1, newVal, oldVal, res](PostPatchArgs args) {
+        CONTEXT* ctxt = args.ctxt;
+        SYSCALL_STANDARD std = args.std;
+
+        //Reset newVal
+        PIN_SetSyscallArgument(ctxt, std, 1, arg1);
+
+        //Set oldVal and free memory
+        ADDRINT arg2 = PIN_GetSyscallArgument(ctxt, std, 2);
+        PIN_SafeCopy((void *)arg2, oldVal, sizeof(struct itimerval));
+        delete newVal;
+        delete oldVal;
+
+        //Set return value in rax
+        PIN_REGISTER reg;
+        reg.dword[0] = res;
+        reg.dword[1] = 0;
+        PIN_SetContextRegval(ctxt, LEVEL_BASE::REG_EAX, (UINT8*)&reg);
+
+        return PPA_NOTHING;
+    };
+}

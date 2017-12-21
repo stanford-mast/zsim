@@ -1,4 +1,5 @@
 /** $lic$
+ * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -24,14 +25,11 @@
  */
 
 #include "pin_cmd.h"
-#include <algorithm>
 #include <iostream>
-#include <linux/version.h>
 #include <sstream>
 #include <string>
 #include <wordexp.h> //for posix-shell command expansion
 #include "config.h"
-#include "pin.H"
 
 //Funky macro expansion stuff
 #define QUOTED_(x) #x
@@ -55,9 +53,18 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
     args.push_back(pinPath);
 
     //Global pin options
-    args.push_back("-follow_execv"); //instrument child processes
+    /* With the following line commented in Pin will stop instrumenting
+     * Muppet as child processes are spawned. Refer to:
+     * https://docs.google.com/a/google.com/presentation/d/1V8jagARoF1RAK71iEqGiEheJUzhjaqoJF5iCP5a5-80/edit?usp=sharing
+     */
+    //args.push_back("-follow_execv"); //instrument child processes
     args.push_back("-tool_exit_timeout"); //don't wait much of internal threads
     args.push_back("1");
+
+    //Make pin work with newer Linux
+    args.push_back("-injection");
+    args.push_back("child");
+    args.push_back("-ifeellucky");
 
     //Additional options (e.g., -smc_strict for Java), parsed from config
     const char* pinOptions = conf->get<const char*>("sim.pinOptions", "");
@@ -67,14 +74,6 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
         args.push_back(g_string(p.we_wordv[i]));
     }
     wordfree(&p);
-
-    if (PIN_PRODUCT_VERSION_MAJOR <= 2 && LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-            && std::find(args.begin(), args.end(), "-injection") == args.end()) {
-        // FIXME(mgao): hack to bypass kernel version check in Pin 2.x.
-        // Parent injection.
-        args.push_back("-injection");
-        args.push_back("parent");
-    }
 
     //Load tool
     args.push_back("-t");
@@ -182,4 +181,3 @@ void PinCmd::setEnvVars(uint32_t procIdx) {
         wordfree(&p);
     }
 }
-

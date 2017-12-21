@@ -43,6 +43,8 @@ class CC : public GlobAlloc {
         //Initialization
         virtual void setParents(uint32_t childId, const g_vector<MemObject*>& parents, Network* network) = 0;
         virtual void setChildren(const g_vector<BaseCache*>& children, Network* network) = 0;
+        virtual g_vector<MemObject*>* getParents() = 0;
+        virtual g_vector<BaseCache*>* getChildren() = 0;
         virtual void initStats(AggregateStat* cacheStat) = 0;
 
         //Access methods; see Cache for call sequence
@@ -69,8 +71,10 @@ class CC : public GlobAlloc {
  *    and issues requests (invalidates) to lower levels.
  * The naming scheme is PROTOCOL-CENTRIC, i.e. if you draw a multi-level hierarchy, between each pair of levels
  * there is a top CC at the top and a bottom CC at the bottom. Unfortunately, if you look at the caches, the
- * bottom CC is at the top is at the bottom. So the cache class may seem a bit weird at times, but the controller
- * classes make more sense.
+ * bottom CC is at the top and the top CC is at the bottom. So the cache class may seem a bit weird at times, but the
+ * controller classes make more sense. Here's an example:
+ *
+ * [core]--[bcc]--[l0-filter]--[bcc]--[tcc]--[L1]--[bcc]--[tcc]--[L2]--[bcc]--[tcc]--[L3]--[mem]
  */
 
 class Cache;
@@ -93,6 +97,7 @@ class MESIBottomCC : public GlobAlloc {
         //Counter profWBIncl, profWBCoh /* writebacks due to inclusion or coherence, received from downstream, does not include PUTS */;
         // TODO: Measuring writebacks is messy, do if needed
         Counter profGETNextLevelLat, profGETNetLat;
+        Counter profSpecGETSHit, profSpecGETSMiss; /*speculative accesses*/
 
         bool nonInclusiveHack;
 
@@ -129,6 +134,8 @@ class MESIBottomCC : public GlobAlloc {
             profFWD.init("FWD", "Forwards (from upper level)");
             profGETNextLevelLat.init("latGETnl", "GET request latency on next level");
             profGETNetLat.init("latGETnet", "GET request latency on network to next level");
+            profSpecGETSHit.init("hSpecGETS", "Speculative GETS hits (disjoint from demand)");
+            profSpecGETSMiss.init("mSpecGETS", "Speculative GETS misses (disjoint from demand)");
 
             parentStat->append(&profGETSHit);
             parentStat->append(&profGETXHit);
@@ -142,11 +149,13 @@ class MESIBottomCC : public GlobAlloc {
             parentStat->append(&profFWD);
             parentStat->append(&profGETNextLevelLat);
             parentStat->append(&profGETNetLat);
+            parentStat->append(&profSpecGETSHit);
+            parentStat->append(&profSpecGETSMiss);
         }
 
         uint64_t processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId);
 
-        uint64_t processAccess(Address lineAddr, uint32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags);
+        uint64_t processAccess(Address lineAddr, int32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags, Address pc, uint32_t skip);
 
         void processWritebackOnAccess(Address lineAddr, uint32_t lineId, AccessType type);
 
@@ -168,6 +177,10 @@ class MESIBottomCC : public GlobAlloc {
         }
 
         //Could extend with isExclusive, isDirty, etc, but not needed for now.
+
+        g_vector<MemObject*>* getParents() {
+            return &parents;
+        }
 
     private:
         uint32_t getParentId(Address lineAddr);
@@ -240,6 +253,10 @@ class MESITopCC : public GlobAlloc {
             return array[lineId].numSharers;
         }
 
+        g_vector<BaseCache*>* getChildren() {
+            return &children;
+        }
+
     private:
         uint64_t sendInvalidates(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId);
 };
@@ -297,6 +314,14 @@ class MESICC : public CC {
             tcc->init(children, network, name.c_str());
         }
 
+        g_vector<MemObject*>* getParents() override {
+            return bcc->getParents();
+        }
+
+        g_vector<BaseCache*>* getChildren() override {
+            return tcc->getChildren();
+        }
+
         void initStats(AggregateStat* cacheStat) {
             //no tcc stats
             bcc->initStats(cacheStat);
@@ -326,7 +351,7 @@ class MESICC : public CC {
 
         bool shouldAllocate(const MemReq& req) {
             if ((req.type == GETS) || (req.type == GETX)) {
-                return true;
+                return (req.prefetch == 0);
             } else {
                 assert((req.type == PUTS) || (req.type == PUTX));
                 if (!nonInclusiveHack) {
@@ -351,7 +376,7 @@ class MESICC : public CC {
             //invalidations. The alternative with this would be to capture these blocks, since we have space anyway. This is so rare is doesn't matter,
             //but if we do proper NI/EX mid-level caches backed by directories, this may start becoming more common (and it is perfectly acceptable to
             //upgrade without any interaction with the parent... the child had the permissions!)
-            if (lineId == -1 || (((req.type == PUTS) || (req.type == PUTX)) && !bcc->isValid(lineId))) { //can only be a non-inclusive wback
+            if (!req.prefetch && (lineId == -1 || (((req.type == PUTS) || (req.type == PUTX)) && !bcc->isValid(lineId)))) { //can only be a non-inclusive wback
                 assert(nonInclusiveHack);
                 assert((req.type == PUTS) || (req.type == PUTX));
                 respCycle = bcc->processNonInclusiveWriteback(req.lineAddr, req.type, startCycle, req.state, req.srcId, req.flags);
@@ -359,10 +384,17 @@ class MESICC : public CC {
                 //Prefetches are side requests and get handled a bit differently
                 bool isPrefetch = req.flags & MemReq::PREFETCH;
                 assert(!isPrefetch || req.type == GETS);
-                uint32_t flags = req.flags & ~MemReq::PREFETCH; //always clear PREFETCH, this flag cannot propagate up
+
+                //The PREFETCH flag must be cleared in the cache which receives the speculative request. It cannot
+                //propagate up after this since this flag effectively says "Don't assign this line to any children" by
+                //preventing TCC from updating its directory.
+                uint32_t flags = req.flags;
+                if (req.prefetch == 0) {
+                    flags &= ~MemReq::PREFETCH;
+                }
 
                 //if needed, fetch line or upgrade miss from upper level
-                respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, flags);
+                respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, flags, req.pc, req.prefetch);
                 if (getDoneCycle) *getDoneCycle = respCycle;
                 if (!isPrefetch) { //prefetches only touch bcc; the demand request from the core will pull the line to lower level
                     //At this point, the line is in a good state w.r.t. upper levels
@@ -427,6 +459,15 @@ class MESITerminalCC : public CC {
             panic("[%s] MESITerminalCC::setChildren cannot be called -- terminal caches cannot have children!", name.c_str());
         }
 
+        g_vector<MemObject*>* getParents() override {
+            return bcc->getParents();
+        }
+
+        g_vector<BaseCache*>* getChildren() override {
+            return nullptr;
+        }
+
+
         void initStats(AggregateStat* cacheStat) {
             bcc->initStats(cacheStat);
         }
@@ -453,7 +494,7 @@ class MESITerminalCC : public CC {
         }
 
         bool shouldAllocate(const MemReq& req) {
-            return true;
+            return (req.prefetch == 0);
         }
 
         uint64_t processEviction(const MemReq& triggerReq, Address wbLineAddr, int32_t lineId, uint64_t startCycle) {
@@ -463,10 +504,18 @@ class MESITerminalCC : public CC {
         }
 
         uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle,  uint64_t* getDoneCycle = nullptr) {
-            assert(lineId != -1);
+            assert(lineId != -1 || req.prefetch > 0);
             assert(!getDoneCycle);
+
+            //If this is a prefetch that doesn't skip any cache levels, clear the PREFETCH flag so that normal
+            //TCC/directory processing occurs
+            uint32_t flags = req.flags;
+            if (req.prefetch == 0) {
+                flags &= ~MemReq::PREFETCH;
+            }
+
             //if needed, fetch line or upgrade miss from upper level
-            uint64_t respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, req.flags);
+            uint64_t respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, flags, req.pc, req.prefetch);
             //at this point, the line is in a good state w.r.t. upper levels
             return respCycle;
         }
