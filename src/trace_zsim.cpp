@@ -40,7 +40,6 @@
 #include "core.h"
 #include "decoder.h"
 #include "event_queue.h"
-#include "google.h"
 #include "init.h"
 #include "trace_reader.h"
 #ifdef ZSIM_USE_YT

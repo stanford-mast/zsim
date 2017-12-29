@@ -1,3 +1,15 @@
+zsim_trace
+=========
+
+zsim_trace introduces a new frontend to zsim to simulate instruction traces in the memtrace format. 
+
+zsim_trace requires the following additional dependencies:
+- XED: git clone from: https://github.com/intelxed/xed , build and set the XEDPATH accordingly
+- DynamoRIO: git clone from: https://github.com/DynamoRIO/dynamorio , build and set the DRIOPATH accordingly
+
+To find the XED library when executing zsim_trace preload it: 
+export LD_LIBRARY_PATH=$XEDPATH/kits/xed-install-base-2017-12-18-lin-x86-64/lib/
+
 zsim
 ====
 
