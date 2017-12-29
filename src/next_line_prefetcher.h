@@ -36,11 +36,12 @@
 
 class NextLinePrefetcher : public CachePrefetcher {
 public:
- explicit NextLinePrefetcher(const g_string& _name, const g_string& _target,
-                             bool _monitor_GETS, bool _monitor_GETX,
-                             uint32_t _degree);
- void initStats(AggregateStat* _parentStat) override;
- uint64_t access(MemReq& _req) override;
+    explicit NextLinePrefetcher(const g_string& _name, const g_string& _target,
+                                bool _monitor_GETS, bool _monitor_GETX,
+                                uint32_t _degree);
+    void initStats(AggregateStat* _parentStat) override;
+    uint64_t access(MemReq& _req) override;
+    void prefetch(MemReq& _req) override;
 
 private:
     bool monitor_GETS_;

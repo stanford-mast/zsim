@@ -86,7 +86,9 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, int32_t lineId, AccessTyp
             MESIState dummyState = I;
             uint32_t parentId = getParentId(lineAddr);
             MemReq req = {pc, lineAddr, GETS, selfId, &dummyState, cycle, &ccLock, dummyState, srcId, flags, skip - 1};
-            parents[parentId]->access(req);
+            uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
+            uint32_t netLat = parentRTTs[parentId];
+            respCycle += nextLevelLat + netLat;
             profSpecGETSMiss.inc();
         } else {
             profSpecGETSHit.inc();

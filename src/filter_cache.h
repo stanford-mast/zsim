@@ -1,5 +1,4 @@
 /** $lic$
- * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -31,6 +30,7 @@
 #include "cache.h"
 #include "galloc.h"
 #include "zsim.h"
+#include "ooo_core_recorder.h"
 
 /* Extends Cache with an L0 direct-mapped cache, optimized to hell for hits
  *
@@ -151,7 +151,7 @@ class FilterCache : public Cache {
         }
 
         uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc) {
-            assert(prefetchQueue.empty());
+          //assert(prefetchQueue.empty());
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;
             futex_lock(&filterLock);
@@ -169,20 +169,6 @@ class FilterCache : public Cache {
             //(e.g., st to x, ld from x+8) and we implement store-load forwarding at the core.
             //So if this is a load, it always sets availCycle; if it is a store hit, it doesn't
             if (oldAddr != vLineAddr) filterArray[idx].availCycle = respCycle;
-
-            //Send out any prefetch requests that were created during the prior access
-            if (unlikely(!prefetchQueue.empty())) {
-                for (auto& prefetch : prefetchQueue) {
-                    req.lineAddr = prefetch.addr;
-                    req.type = GETS;
-                    req.cycle = curCycle;  //XXX If caches don't modify this field then it doesn't need to be assigned
-                    dummyState = MESIState::I;
-                    req.flags = reqFlags | MemReq::PREFETCH | MemReq::SPECULATIVE;  //Always SPECULATIVE, PREFETCH until inserted
-                    req.prefetch = prefetch.skip;
-                    access(req);
-                }
-                prefetchQueue.clear();
-            }
 
             futex_unlock(&filterLock);
             return respCycle;
@@ -209,6 +195,21 @@ class FilterCache : public Cache {
             // the cache for which the value is zero.
             prefetchQueue.emplace_back(lineAddr, skip);
         }
+
+  void executePrefetch(uint64_t curCycle, uint64_t dispatchCycle, uint64_t reqSatisfiedCycle, OOOCoreRecorder *cRec) {
+    futex_lock(&filterLock);
+            //Send out any prefetch requests that were created during the prior access
+            if (unlikely(!prefetchQueue.empty())) {
+                for (auto& prefetch : prefetchQueue) {
+                  MESIState dummyState = MESIState::I;
+                  MemReq req = {0 /*No PC*/, prefetch.addr, GETS, 0, &dummyState, dispatchCycle, &filterLock, dummyState, srcId, MemReq::PREFETCH | MemReq::SPECULATIVE, prefetch.skip};
+                  uint64_t respCycle = access(req);
+                  cRec->record(curCycle, dispatchCycle, respCycle);
+                }
+                prefetchQueue.clear();
+            }
+            futex_unlock(&filterLock);
+  }
 
         void contextSwitch() {
             futex_lock(&filterLock);

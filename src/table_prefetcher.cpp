@@ -67,7 +67,12 @@ uint64_t TablePrefetcher::access(MemReq& _req) {
     if (!monitored) {
         return resp_cycle;  //Ignore other requests
     }
+    prefetch(_req);
 
+    return resp_cycle;
+}
+
+void TablePrefetcher::prefetch(MemReq& _req) {
     //Prefetch based on the table info indexed by the PC
     auto table_entry_iter = table_.find(_req.pc);
     if (table_entry_iter != table_.end()) {
@@ -99,7 +104,7 @@ uint64_t TablePrefetcher::access(MemReq& _req) {
             hist.second = _req.lineAddr;
         }
     }
-    return resp_cycle;
+    return;
 }
 
 void TablePrefetcher::readTable(const g_string& _name) {

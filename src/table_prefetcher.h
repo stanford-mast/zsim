@@ -66,6 +66,7 @@ class TablePrefetcher : public CachePrefetcher {
                                  bool _stride_detection);
         void initStats(AggregateStat* _parentStat) override;
         uint64_t access(MemReq& _req) override;
+        void prefetch(MemReq& _req) override;
 
     private:
         void schedulePrefetch(uint64_t _addr, const MemReq &_req);

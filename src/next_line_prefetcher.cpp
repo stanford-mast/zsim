@@ -61,12 +61,18 @@ uint64_t NextLinePrefetcher::access(MemReq& _req) {
         return resp_cycle;  //Ignore other requests
     }
 
+    prefetch(req);
+
+    return resp_cycle;
+}
+
+void NextLinePrefetcher::prefetch(MemReq& _req) {
     auto &queue_info = d_caches_[_req.srcId];  //This is pair<cache-ptr, skip>
-    uint64_t line_addr = req.lineAddr;
+    uint64_t line_addr = _req.lineAddr;
     for (uint32_t i = 0; i < degree_; i++) {
         line_addr++;
         queue_info.first->schedulePrefetch(line_addr, queue_info.second);
         prof_emitted_prefetches_.inc();
     }
-    return resp_cycle;
+    return;
 }

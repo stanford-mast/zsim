@@ -48,6 +48,7 @@ class CachePrefetcher : public BaseCache {
         void setChildren(const g_vector<BaseCache*>& _children, Network* _network) override;
         g_vector<BaseCache*>* getChildren() override;
         uint64_t invalidate(const InvReq& _req) override;
+        virtual void prefetch(MemReq& _req) = 0;
 
     protected:
         g_string name_;

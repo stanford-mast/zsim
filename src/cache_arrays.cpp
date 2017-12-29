@@ -27,6 +27,9 @@
 #include "hash.h"
 #include "repl_policies.h"
 
+#include "zsim.h"
+#include "cache_prefetcher.h"
+
 /* Set-associative array implementation */
 
 SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf) : rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc)  {
@@ -47,6 +50,9 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     objStats->append(&profPrefLateMiss);
     profPrefLateTotalCycles.init("prefTotalLateCyc", "Total cycles lost waiting on late prefetches");
     objStats->append(&profPrefLateTotalCycles);
+    profPrefSavedCycles.init("prefSavedCyc", "Total cycles saved by hitting a prefetched line (also if late)");
+    objStats->append(&profPrefSavedCycles);
+    profPrefInaccurateOOO.init("prefInaccurateOOO", "Number of useless prefetches due to OOO");
     parentStat->append(objStats);
 }
 
@@ -54,32 +60,41 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
     for (uint32_t id = first; id < first + assoc; id++) {
-        if (array[id].addr == lineAddr) {
+        if (array[id].addr ==  lineAddr) {
             if (updateReplacement) rp->update(id, req);
-            if (updateReplacement && array[id].prefetch && !(req->flags & MemReq::SPECULATIVE)) {
-                if (array[id].availCycle > req->cycle) {
-                    profPrefLateMiss.inc();
-                    profPrefLateTotalCycles.inc(array[id].availCycle - req->cycle);
+            if (req != nullptr) {
+                //cache hit, line is in the cache
+                if (req->cycle > array[id].availCycle) {
+                    *availCycle = req->cycle;
                 }
-                else {
-                    profPrefHit.inc();
+                //line is in flight, compensate for potential OOO
+                else if (req->cycle < array[id].startCycle) {
+                    *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
+                    //In case of OOO, fix state by storing cycles of the earlier access
+                    array[id].availCycle = *availCycle;
+                    array[id].startCycle = req->cycle;
+                    profPrefInaccurateOOO.inc();
+                } else {
+                    *availCycle = array[id].availCycle;
+                    profPrefSavedCycles.inc(array[id].availCycle - req->cycle);
                 }
-                array[id].prefetch = false;
-            }
-            if (req == nullptr) {
-                return id;
-            }
-            //cache hit, line is in the cache
-            if (req->cycle > array[id].availCycle) {
-                *availCycle = req->cycle;
-            }
-            //line is in flight, compensate for potential OOO
-            else if (req->cycle < array[id].startCycle) {
-                *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
-            } else {
-                *availCycle = array[id].availCycle;
-            }
+                if (updateReplacement && array[id].prefetch && !(req->flags & MemReq::SPECULATIVE)) {
+                    if (array[id].availCycle > req->cycle) {
+                        profPrefLateMiss.inc();
+                        profPrefLateTotalCycles.inc(*availCycle - req->cycle);
+                    }
+                    else {
+                        profPrefHit.inc();
+                    }
+                    array[id].prefetch = false;
 
+                    // XXX hack:
+                    if (zinfo->prefetcher) {
+                        MemReq r = *req;
+                        zinfo->prefetcher->prefetch(r);
+                    }
+                }
+            }
             return id;
         }
     }

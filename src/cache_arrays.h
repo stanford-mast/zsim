@@ -44,8 +44,7 @@ struct AddrCycle {
 class CacheArray : public GlobAlloc {
     public:
         /* Returns tag's ID if present, -1 otherwise. If updateReplacement is set, call the replacement policy's update() on the line accessed
-         * Also set the block availability cycle via 'availCycle' if the tag's ID is present and the req was valid. Req can be a nullptr
-         * for pure lookups that are not part of a true memory access, in this case availCycle is not required*/
+         * Also set the block availability cycle via 'availCycle' if the tag's ID is present*/
         virtual int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t *availCycle) = 0;
 
         /* Runs replacement scheme, returns tag ID of new pos and address of line to write back*/
@@ -79,6 +78,8 @@ class SetAssocArray : public CacheArray {
         Counter profPrefEarlyMiss;
         Counter profPrefLateMiss;
         Counter profPrefLateTotalCycles;
+        Counter profPrefSavedCycles;
+        Counter profPrefInaccurateOOO;
 
     public:
         SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf);

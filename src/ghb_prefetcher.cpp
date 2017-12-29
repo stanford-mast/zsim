@@ -64,6 +64,8 @@ void GhbPrefetcher::initStats(AggregateStat* parentStat) {
     s->append(&prof_emitted_prefetches);
     prof_stride_prefetches.init("spf", "Stride prefetches emitted (subset of emitted prefetches)");
     s->append(&prof_stride_prefetches);
+    prof_prefetcher_accessed.init("accessed", "Prefetcher accessed");
+    s->append(&prof_prefetcher_accessed);
     parentStat->append(s);
 }
 
@@ -75,28 +77,12 @@ void GhbPrefetcher::schedReq(uint32_t srcId, uint64_t lineAddr) {
     filterCache->schedulePrefetch(lineAddr, distance);
 }
 
-uint64_t GhbPrefetcher::access(MemReq& _req) {
-    MemReq req = _req;
-    req.childId = childId_;
-    uint32_t bank = CacheBankHash::hash(req.lineAddr, parents_.size());
-    uint64_t resp_cycle = parents_[bank]->access(req);
-    uint32_t coreId = req.srcId;
+void GhbPrefetcher::prefetch(MemReq& _req) {
+    prof_prefetcher_accessed.inc();
+
+    uint32_t coreId = _req.srcId;
     assert(coreId < zinfo->numCores);
-
-    if (req.flags & MemReq::SPECULATIVE) {
-        return resp_cycle;
-    }
-    //Only do data prefetches for now
-    if (req.flags & MemReq::IFETCH) {
-        return resp_cycle;
-    }
-    bool monitored = (monitor_GETS && req.type == GETS)
-        || (monitor_GETX && req.type == GETX);
-    if (!monitored) {
-        return resp_cycle;
-    }
-
-    uint64_t line_addr = req.lineAddr;
+    uint64_t line_addr = _req.lineAddr;
     //Address space is partitioned into zones (i.e. pages).
     //Index table is CAM addressed with the czone.
     uint64_t czone_tag = line_addr >> log_distance;
@@ -124,21 +110,21 @@ uint64_t GhbPrefetcher::access(MemReq& _req) {
             index[coreId].erase(deleteme);
         }
         index[coreId].emplace(czone_tag, IndexEntry(ghb_head_hidden,
-                                                     req.cycle));
+                                                     _req.cycle));
         //Add ghb entry to head without chain ptr
-        ghb[coreId][ghb_head].line_addr = req.lineAddr;
+        ghb[coreId][ghb_head].line_addr = _req.lineAddr;
         ghb[coreId][ghb_head].next = GHB_INVALID_PTR;
     }
     else {
         //Index table hit
         IndexEntry *idx_entry = &it_entry->second;
         //Add ghb entry to head
-        ghb[coreId][ghb_head].line_addr = req.lineAddr;
+        ghb[coreId][ghb_head].line_addr = _req.lineAddr;
         ghb[coreId][ghb_head].next = idx_entry->ghb_entry;
 
         //Update index
         idx_entry->ghb_entry = ghb_head_hidden;
-        idx_entry->last_access = req.cycle;
+        idx_entry->last_access = _req.cycle;
 
         //Now traverse the GHB and emit prefetches:
         //1. Find all deltas by pointer chasing through the GHB and computing
@@ -166,11 +152,11 @@ uint64_t GhbPrefetcher::access(MemReq& _req) {
             last_line_addr = ghb[coreId][ghb_ptr].line_addr;
         }
 
-        //Determining prefetch pattern requires at least two misses in the history
+        //Determining prefetch pattern _requires at least two misses in the history
         if (delta_buffer.size() < 2) {
             ghb_head_hidden++;
 
-            return resp_cycle;
+            return;
         }
 
         auto it = delta_buffer.begin();
@@ -184,7 +170,7 @@ uint64_t GhbPrefetcher::access(MemReq& _req) {
             for (uint32_t i = 0; i < degree; i++) {
                 line_addr += delta_1st;
                 prof_stride_prefetches.inc();
-                schedReq(req.srcId, line_addr);
+                schedReq(_req.srcId, line_addr);
             }
         }
         //3. Find periodic signal
@@ -198,8 +184,9 @@ uint64_t GhbPrefetcher::access(MemReq& _req) {
                     //and we would prefetch that sequence
                     for (uint32_t i = 0; i < degree && i < delta_buffer.size(); i++) {
                         line_addr += delta_buffer[i % period];
-                        schedReq(req.srcId, line_addr);
+                        schedReq(_req.srcId, line_addr);
                     }
+                    break;
                 }
                 last_it = it;
             }
@@ -207,6 +194,28 @@ uint64_t GhbPrefetcher::access(MemReq& _req) {
     }
 
     ghb_head_hidden++;
+}
+
+uint64_t GhbPrefetcher::access(MemReq& _req) {
+    MemReq req = _req;
+    req.childId = childId_;
+    uint32_t bank = CacheBankHash::hash(req.lineAddr, parents_.size());
+    uint64_t resp_cycle = parents_[bank]->access(req);
+
+    if (req.flags & MemReq::SPECULATIVE) {
+        return resp_cycle;
+    }
+    //Only do data prefetches for now
+    if (req.flags & MemReq::IFETCH) {
+        return resp_cycle;
+    }
+    bool monitored = (monitor_GETS && req.type == GETS)
+        || (monitor_GETX && req.type == GETX);
+    if (!monitored) {
+        return resp_cycle;
+    }
+
+    prefetch(req);
 
     return resp_cycle;
 }

@@ -72,7 +72,7 @@ private:
     std::vector<std::unordered_map<uint64_t, IndexEntry>> index;
     std::vector<std::vector<GhbEntry>> ghb;
 
-    Counter prof_emitted_prefetches, prof_stride_prefetches;
+    Counter prof_emitted_prefetches, prof_stride_prefetches, prof_prefetcher_accessed;
 
     bool ghb_ptr_valid(uint32_t ghb_ptr, uint32_t coreId);
     uint32_t ghb_head_idx(uint32_t ghb_ptr);
@@ -93,6 +93,7 @@ public:
 
     void initStats(AggregateStat* parentStat) override;
     uint64_t access(MemReq& _req) override;
+    void prefetch(MemReq& _req) override;
 };
 
 #endif

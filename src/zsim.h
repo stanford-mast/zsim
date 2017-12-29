@@ -1,5 +1,4 @@
 /** $lic$
- * Copyright (C) 2017 by Google
  * Copyright (C) 2012-2015 by Massachusetts Institute of Technology
  * Copyright (C) 2010-2013 by The Board of Trustees of Stanford University
  *
@@ -33,6 +32,9 @@
 #include "debug.h"
 #include "locks.h"
 #include "pad.h"
+
+// XXX hack for prefetcher
+class CachePrefetcher;
 
 class Core;
 class Scheduler;
@@ -184,6 +186,9 @@ struct GlobSimInfo {
     // Trace-driven simulation (no cores)
     bool traceDriven;
     TraceDriver* traceDriver;
+
+    //XXX Hack
+    CachePrefetcher* prefetcher;
 };
 
 

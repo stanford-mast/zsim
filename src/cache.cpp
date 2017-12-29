@@ -99,7 +99,7 @@ uint64_t Cache::access(MemReq& req) {
         EventRecorder* evRec = zinfo->eventRecorders[req.srcId];
         TimingRecord wbAcc;
         wbAcc.clear();
-        if (unlikely(evRec && evRec->hasRecord())) {
+        if (unlikely(evRec && evRec->hasRecord() && req.prefetch == 0)) {
             wbAcc = evRec->popRecord();
         }
 #endif
