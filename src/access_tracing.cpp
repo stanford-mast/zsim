@@ -26,8 +26,8 @@
 
 #include "access_tracing.h"
 #include "bithacks.h"
-#include <hdf5.h>
-#include <hdf5_hl.h>
+#include <hdf5/serial/hdf5.h>
+#include <hdf5/serial/hdf5_hl.h>
 
 #define PT_CHUNKSIZE (1024*256u)  // 256K records (~6MB)
 

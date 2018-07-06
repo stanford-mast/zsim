@@ -25,8 +25,8 @@
  */
 
 #include <fstream>
-#include <hdf5.h>
-#include <hdf5_hl.h>
+#include <hdf5/serial/hdf5.h>
+#include <hdf5/serial/hdf5_hl.h>
 #include <iostream>
 #include <vector>
 #include "galloc.h"

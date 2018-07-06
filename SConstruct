@@ -108,6 +108,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Be a Warning Nazi? (recommended)
     env["CPPFLAGS"] += " -Werror "
+    env["CPPFLAGS"] += " -Wno-unused-function "
+    env["CPPFLAGS"] += " -Wno-int-in-bool-context "
 
     # Enables lib and harness to use the same info/log code,
     # but only lib uses pin locks for thread safety
@@ -146,6 +148,9 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Non-pintool libraries
     env["LIBPATH"] = []
+    if TRACE:
+        env["LIBPATH"] += [joinpath(XEDPATH, "obj")]
+	env["LIBPATH"] += [joinpath(DRIOPATH, "build/clients/lib64/release")]
     env["LIBS"] = ["config++"]
 
     env["LINKFLAGS"] = ""
@@ -182,10 +187,10 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # HDF5
     conf = Configure(Environment(), conf_dir=joinpath(buildDir, ".sconf_temp"), log_file=joinpath(buildDir, "sconf.log"))
-    if conf.CheckLib('hdf5') and conf.CheckLib('hdf5_hl'):
-        env["PINLIBS"] += ["hdf5", "hdf5_hl"]
-    elif conf.CheckLib('hdf5_serial') and conf.CheckLib('hdf5_serial_hl'):
-        # Serial version, in Ubuntu 15.04 and later.
+    #if conf.CheckLib('hdf5') and conf.CheckLib('hdf5_hl'):
+    #    env["PINLIBS"] += ["hdf5", "hdf5_hl"]
+    if conf.CheckLib('hdf5_serial') and conf.CheckLib('hdf5_serial_hl'):
+    # Serial version, in Ubuntu 15.04 and later.
         env["PINLIBS"] += ["hdf5_serial", "hdf5_serial_hl"]
         env["CPPFLAGS"] += ' -DHDF5INCPREFIX="hdf5/serial/"'
     else:

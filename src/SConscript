@@ -94,10 +94,10 @@ syscallSrc = libEnv.Substfile("virt/syscall_name.cpp", "virt/syscall_name.cpp.in
 # Build zsim trace
 #env["LINKFLAGS"] += " --static "
 env["CPPFLAGS"] += " -std=c++11 -DTRACE_BASED=1"
-env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/xed/kits/xed-install-base-2017-12-18-lin-x86-64/lib/"]
-env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/clients/lib64/release/"]
-env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/ext/lib64/release/"]
-env["LIBS"] += ["pthread", "hdf5", "hdf5_hl", "z", "xed", "drmemtrace", "drmemtrace_analyzer"]
+#env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/xed/kits/xed-install-base-2017-12-18-lin-x86-64/lib/"]
+#env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/clients/lib64/release/"]
+#env["LIBPATH"] += ["/usr/local/google/home/heinerl/git_local/dynamorio/build/ext/lib64/release/"]
+env["LIBS"] += ["pthread", "hdf5_serial", "hdf5_serial_hl", "z", "xed", "drmemtrace", "drmemtrace_analyzer"]
 env.Program("zsim_trace",  traceSrcs + commonSrcs + traceReaderSrcs)
 
 

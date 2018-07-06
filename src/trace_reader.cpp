@@ -16,6 +16,10 @@
 #include "elf.h"
 #include "log.h"
 
+//analyzer_t is linked via a static lib which creates problems with the zsim shared library
+//I think it can be fixed by building a memtrace analzyer shared lib or by ?
+#include "/home/hlitz/dynamorio/clients/drcachesim/analyzer.cpp"
+
 // Remove and include <memory> when using C++14 or later
 template<typename T, typename... Args>
 static std::unique_ptr<T> make_unique(Args&&... args) {
@@ -180,17 +184,57 @@ void TraceReader::binaryGroupPathIs(const std::string &_path) {
   clearBinaries();
   binary_ready_ = true;  // An absent binary is allowed
   if (!_path.empty()) {
-    // Check for 'binary-info.txt' and all of the files it specifies
-    std::string info_name = _path + "/binary-info.txt";
+    std::string info_name = _path + "/raw/modules.log";
     ifstream info_file(info_name);
     if (!info_file.is_open()) {
       panic("Could not open binary collection info file '%s': %s",
             info_name.c_str(), strerror(errno));
     }
     std::string name;
-    uint64_t offset;
-    while (info_file >> name >> std::hex >> offset >> std::dec) {
-      binary_ready_ &= initBinary(_path + "/" + name, offset);
+    std::string id;
+    std::string containing_id;
+    std::string start;
+    std::string end;
+    std::string entry;
+    std::string offset;
+    std::string custom;
+    std::string path;
+    uint64_t offseti, idi;
+    char s[10000];
+    
+    uint64_t cur_id = 0;
+    bool in_elf = false;
+    //skip 2 header lines
+    info_file.getline(s, 10000);
+    info_file.getline(s, 10000);
+    while(info_file.getline(s, 10000)){
+      
+      std::stringstream ss;
+      ss.str(std::string(s));
+      ss >>  id >> containing_id >> start >> end >> entry >> offset >> custom >> path;
+      if (id.size() == 0){
+	continue;
+      }
+      id.pop_back();
+      idi = atoi(id.c_str());
+
+      if (custom.find("ELF")!=std::string::npos){
+	if (!in_elf)
+	  cur_id++;
+	in_elf = true;
+	continue;
+      }
+      if (idi != cur_id){	
+	continue;
+      }
+      start.pop_back();
+      std::stringstream sa;
+      sa.str(start);
+      sa >> std::hex >> offseti;
+      binary_ready_ &= initBinary(path, offseti);
+
+      cur_id++;
+      in_elf = false;
     }
   }
 }
