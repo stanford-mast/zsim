@@ -199,7 +199,7 @@ void TraceReader::binaryGroupPathIs(const std::string &_path) {
     std::string offset;
     std::string custom;
     std::string path;
-    uint64_t offseti, idi;
+    uint64_t offseti, starti, idi;
     char s[10000];
     
     uint64_t cur_id = 0;
@@ -230,9 +230,15 @@ void TraceReader::binaryGroupPathIs(const std::string &_path) {
       start.pop_back();
       std::stringstream sa;
       sa.str(start);
-      sa >> std::hex >> offseti;
-      binary_ready_ &= initBinary(path, offseti);
+      sa >> std::hex >> starti;
 
+      offset.pop_back();
+      std::stringstream of;
+      of.str(offset);
+      of >> std::hex >> offseti;
+
+      binary_ready_ &= initBinary(path, starti + offseti);
+      std::cout << path << " " << std::hex << offseti << " " << starti << std::endl;
       cur_id++;
       in_elf = false;
     }
