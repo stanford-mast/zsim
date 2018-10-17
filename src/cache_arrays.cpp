@@ -59,6 +59,7 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
 int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
+
     for (uint32_t id = first; id < first + assoc; id++) {
         if (array[id].addr ==  lineAddr) {
             if (updateReplacement) rp->update(id, req);
@@ -66,7 +67,10 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
                 //cache hit, line is in the cache
                 if (req->cycle > array[id].availCycle) {
                     *availCycle = req->cycle;
-                }
+		    if (array[id].prefetch) {
+			profPrefSavedCycles.inc(array[id].availCycle - array[id].startCycle);
+		    }
+		}
                 //line is in flight, compensate for potential OOO
                 else if (req->cycle < array[id].startCycle) {
                     *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
@@ -76,7 +80,10 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
                     profPrefInaccurateOOO.inc();
                 } else {
                     *availCycle = array[id].availCycle;
-                    profPrefSavedCycles.inc(array[id].availCycle - req->cycle);
+		    if (array[id].prefetch) {
+			profPrefSavedCycles.inc(req->cycle - array[id].startCycle);
+			assert((req->cycle - array[id].startCycle) <= (array[id].availCycle - array[id].startCycle));
+		    }
                 }
                 if (updateReplacement && array[id].prefetch && !(req->flags & MemReq::SPECULATIVE)) {
                     if (array[id].availCycle > req->cycle) {
