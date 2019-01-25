@@ -34,6 +34,7 @@
 #include "stats.h"
 
 #include "cache.h"
+#include "cache_prefetcher.h"
 #include "filter_cache.h"
 #include <iostream>
 #include <unordered_map>
@@ -65,7 +66,7 @@ class SatCounter {
  * FIXME: For now, mostly hardcoded; 64-line entries (4KB w/64-byte lines), fixed granularities, etc.
  * TODO: Adapt to use weave models
  */
-class StreamPrefetcher : public BaseCache{
+class StreamPrefetcher : public CachePrefetcher {
     private:
         struct Entry {
             // Two competing strides; at most one active
@@ -115,37 +116,24 @@ class StreamPrefetcher : public BaseCache{
             profShortHits, profStrideSwitches, profLowConfAccs;
         Counter prof_emitted_prefetches_;
 
-        g_vector<MemObject*> parents_;
-        MemObject* parent;
-        BaseCache* child;
-        g_vector<BaseCache*> children_;
-	g_vector<std::pair<FilterCache*, int32_t>> d_caches_;
-	g_vector<std::pair<FilterCache*, int32_t>> i_caches_;
-	uint32_t childId_;
         g_string name_;
         uint32_t streams; //Default 16. Number of streams being monitored
         uint32_t degree;  //Default 2. agressiveness, number of prefetches issued at once until we reach distance
-	g_string target_prefix_;
         void schedReq(uint32_t srcId, uint64_t lineAddr);
 
     public:
         explicit StreamPrefetcher(const g_string& _name,
 			          uint32_t _streams,
 			          uint32_t _log_distance,uint32_t _degree, const g_string& _target) :
-            timestamp(0), log_distance(_log_distance),
+            CachePrefetcher(_name, _target), timestamp(0), log_distance(_log_distance),
             distance(1 << log_distance), tag(_streams),
             array(_streams, distance),name_(_name),
-             streams(_streams), degree(_degree), target_prefix_(_target + '-') {};
+            streams(_streams), degree(_degree)  {};
 
 
-	void postInit() override;
         void initStats(AggregateStat* parentStat) override;
-        const char* getName() override { return name_.c_str();}
-        void setParents(uint32_t _childId, const g_vector<MemObject*>& _parents, Network* _network) override;
-        g_vector<MemObject*>* getParents() override;
-        void setChildren(const g_vector<BaseCache*>& children, Network* network) override;
-        g_vector<BaseCache*>* getChildren() override;
         uint64_t access(MemReq& req) override;
+        void prefetch(MemReq& _req) override;
         uint64_t invalidate(const InvReq& req) override;
 };
 

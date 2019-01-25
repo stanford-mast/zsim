@@ -34,119 +34,6 @@
 //#define DBG(args...) info(args)
 #define DBG(args...)
 
-void StreamPrefetcher::postInit() {
-    //Traverse the now stable memory hierarchy to find the prefetch target and all terminal (filter/l0) cache children
-    //to use their prefetch queues
-    g_list<std::pair<MemObject*, int32_t>> queue;
-    std::unordered_set<MemObject*> visited;
-    queue.emplace_back(this, 0);
-    visited.insert(this);
-    bool target_found = false;
-    int32_t target_level = 0;  // Positive for parent, negative for child
-    while (!queue.empty()) {
-        BaseCache* cache = dynamic_cast<BaseCache*>(queue.front().first);
-        int32_t cur_level = queue.front().second;
-        queue.pop_front();
-        if (!cache) {
-            //E.g., could be main memory
-            continue;
-        }
-
-        //Check for the target cache
-        g_string name(cache->getName());
-        if (!name.compare(0, target_prefix_.size(), target_prefix_)) {
-            target_found = true;
-            target_level = cur_level;
-            DBG("Prefetcher '%s' found target '%s' (level %d)", name_.c_str(), name.c_str(), target_level);
-        }
-
- //Check for a terminal cache
-        FilterCache* fcache = dynamic_cast<FilterCache*>(cache);
-        if (fcache) {
-            uint32_t idx = fcache->getSourceId();
-            if (fcache->getType() == FilterCache::Type::D) {
-                DBG("Prefetcher '%s' found i-cache '%s' idx %u level %d", name_.c_str(), fcache->getName(), idx, cur_level);
-                d_caches_.resize(MAX(idx + 1, d_caches_.size()));
-                d_caches_[idx] = std::make_pair(fcache, cur_level);
-            } else {
-                DBG("Prefetcher '%s' found d-cache '%s' idx %u level %d", name_.c_str(), fcache->getName(), idx, cur_level);
-                i_caches_.resize(MAX(idx + 1, i_caches_.size()));
-                i_caches_[idx] = std::make_pair(fcache, cur_level);
-            }
-        } else {
-            //Continue the search for the target and/or terminal caches
-            auto* parents = cache->getParents();
-            if (parents) {
-                for (auto parent : *parents) {
-                    if (visited.count(parent) == 0) {
-                        visited.insert(parent);
-                        queue.emplace_back(parent, cur_level + 1);
-                    }
-                }
-            }
-            auto* children = cache->getChildren();
-            if (children) {
-                for (auto child : *children) {
-                    //Avoid searching other children of the parent
-                    if (visited.count(child) == 0 && cur_level <= 0) {
-                        visited.insert(child);
-                        //Zero-base from the prefetcher's children
-                        queue.emplace_back(child, ((cache == this) ? 0 : cur_level - 1));
-                    }
-                }
-            }
-        }
-    }
-
-    if (!target_found) {
-        panic("Prefetcher '%s' could not find target cache with pattern '%s'", name_.c_str(), target_prefix_.c_str());
-    }
-
-    if (i_caches_.empty() || d_caches_.empty()) {
-        panic("Prefetcher '%s' couldn't find any terminal caches", name_.c_str());
-    }
-
-
- //Convert the filter cache levels to distances from the target
-    for (auto& icache : i_caches_) {
-        //Depending on the hierarchy, some of these slots may be empty/invalid,
-        //however these slots should never be accessed anyway
-        if (icache.first != nullptr) {
-            icache.second = target_level - icache.second;
-            assert(icache.second >= 0);
-        }
-    }
-    for (auto& dcache : d_caches_) {
-        //Depending on the hierarchy, some of these slots may be empty/invalid,
-        //however these slots should never be accessed anyway
-        if (dcache.first != nullptr) {
-            dcache.second = target_level - dcache.second;
-            assert(dcache.second >= 0);
-        }
-    }
-}
-
-void StreamPrefetcher::setParents(uint32_t _childId, const g_vector<MemObject*>& _parents, Network* _network) {
-    childId_ = _childId;
-    if (_network) panic("Network not handled");
-    assert(!_parents.empty());
-    parents_ = _parents;
-}
-
-g_vector<MemObject*>* StreamPrefetcher::getParents() {
-    return &parents_;
-}
-
-void StreamPrefetcher::setChildren(const g_vector<BaseCache*>& _children, Network* network) {
-    if (network) panic("Network not handled");
-    assert(!_children.empty());
-    children_ = _children;
-}
-
-g_vector<BaseCache*>* StreamPrefetcher::getChildren() {
-    return &children_;
-}
-
 void StreamPrefetcher::initStats(AggregateStat* parentStat) {
     AggregateStat* s = new AggregateStat();
     s->init(name_.c_str(), "Prefetcher stats");
@@ -176,9 +63,7 @@ void StreamPrefetcher::schedReq(uint32_t srcId, uint64_t lineAddr) {
 }
 
 uint64_t StreamPrefetcher::access(MemReq& req) {
-    uint32_t origChildId = req.childId;
     req.childId = childId_;
-    uint64_t reqCycle = req.cycle;
     uint32_t bank = CacheBankHash::hash(req.lineAddr, parents_.size());
     uint64_t respCycle = parents_[bank]->access(req);
 
@@ -194,6 +79,11 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
   if (!monitored) {
         return respCycle;
     }
+   prefetch(req);
+   return respCycle;
+}
+
+void StreamPrefetcher::prefetch(MemReq& req) {
     profAccesses.inc();
     uint32_t coreId = req.srcId;
     assert(coreId < zinfo->numCores);
@@ -213,7 +103,7 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
         uint64_t candScore = -1;
         //uint64_t candScore = 0;
         for (uint32_t i = 0; i < streams; i++) {
-            if (array[i].lastCycle > reqCycle + 500) continue;  // warm prefetches, not even a candidate
+            if (array[i].lastCycle > req.cycle + 500) continue;  // warm prefetches, not even a candidate
             if (array[i].ts < candScore) {  // just LRU
                 cand = i;
                 candScore = array[i].ts;
@@ -221,7 +111,7 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
         }
         if (cand < streams) {
             idx = cand;
-            array[idx].alloc(reqCycle);
+            array[idx].alloc(req.cycle);
             array[idx].lastPos = pos;
             array[idx].ts = timestamp++;
             tag[idx] = pageAddr;
@@ -254,7 +144,7 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
 
                 if (prefetchPos < distance && !e.valid[prefetchPos]) {
                     MESIState state = I;
-                    MemReq pfReq = {0 /*no PC*/, req.lineAddr + prefetchPos - pos, GETS, req.childId, &state, reqCycle, req.childLock, state, req.srcId, MemReq::PREFETCH, 0 /*not an in-cache prefetch*/};
+                    MemReq pfReq = {0 /*no PC*/, req.lineAddr + prefetchPos - pos, GETS, req.childId, &state, req.cycle, req.childLock, state, req.srcId, MemReq::PREFETCH, 0 /*not an in-cache prefetch*/};
                     schedReq(pfReq.srcId, pfReq.lineAddr);
                     e.valid[prefetchPos] = true;
                     profPrefetches.inc();
@@ -304,8 +194,6 @@ uint64_t StreamPrefetcher::access(MemReq& req) {
         e.lastLastPos = e.lastPos;
         e.lastPos = pos;
     }
-    req.childId = origChildId;
-    return respCycle;
 }
 
 // nop for now; do we need to invalidate our own state?
