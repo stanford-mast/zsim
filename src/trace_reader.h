@@ -97,7 +97,7 @@ class TraceReader {
   void binaryGroupPathIs(const std::string &_path);
   void clearBinaries();
   bool initTrace();
-  bool initBinary(const std::string &_name, uint64_t _offset);
+  bool initBinary(const std::string &_name, uint64_t _offset, uint64_t _file_offset);
   void fillCache(uint64_t _vAddr, uint8_t _reported_size);
   std::unique_ptr<xed_decoded_inst_t> makeNop(uint8_t _length);
   bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size);

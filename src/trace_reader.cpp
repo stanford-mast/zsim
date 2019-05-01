@@ -176,7 +176,7 @@ void TraceReader::binaryFileIs(const std::string &_binary, uint64_t _offset) {
     // An absent binary is allowed
     binary_ready_ = true;
   } else {
-    binary_ready_ = initBinary(_binary, _offset);
+    binary_ready_ = initBinary(_binary, _offset, 0);
   }
 }
 
@@ -236,9 +236,8 @@ void TraceReader::binaryGroupPathIs(const std::string &_path) {
       std::stringstream of;
       of.str(offset);
       of >> std::hex >> offseti;
+      binary_ready_ &= initBinary(path, starti, offseti);
 
-      binary_ready_ &= initBinary(path, starti + offseti);
-      std::cout << path << " " << std::hex << offseti << " " << starti << std::endl;
       cur_id++;
       in_elf = false;
     }
@@ -301,7 +300,7 @@ bool TraceReader::initTrace() {
   }
 }
 
-bool TraceReader::initBinary(const std::string &_name, uint64_t _offset) {
+bool TraceReader::initBinary(const std::string &_name, uint64_t _offset, uint64_t _file_offset) {
   // Load the input file to memory
   int fd = open(_name.c_str(), O_RDONLY);
   if (fd == -1) {
@@ -348,7 +347,7 @@ bool TraceReader::initBinary(const std::string &_name, uint64_t _offset) {
     panic("ELF file is too small for section headers");
     return false;
   }
-  Elf64_Shdr* shdr = reinterpret_cast<Elf64_Shdr*>(data + shoff);
+  Elf64_Shdr* shdr = reinterpret_cast<Elf64_Shdr*>(data + shoff + _file_offset);
   for (Elf64_Half i = 0; i < hdr->e_shnum; i++) {
     if ((shdr[i].sh_type == SHT_PROGBITS) &&
         (shdr[i].sh_flags & SHF_EXECINSTR)) {
