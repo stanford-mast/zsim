@@ -41,10 +41,8 @@
 #include "decoder.h"
 #include "event_queue.h"
 #include "init.h"
-#include "trace_reader.h"
-#ifdef ZSIM_USE_YT
-#include "yt_tracer.h"
-#endif  // ZSIM_USE_YT
+
+#include "trace_reader_memtrace.h"
 
 const uint32_t END_TRACE_SIM = ~0x0;
 const uint32_t CONTENTION_THREAD = ~0x0 - 1;
@@ -149,7 +147,7 @@ uint32_t TakeBarrier(uint32_t tid, uint32_t cid) {
             auto now = std::chrono::steady_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count();
             info("Simulate Phase %lu Simulation Speed: %lu KIPS", zinfo->numPhases,
-                 (zinfo->phaseLength * interval)/duration);
+                 static_cast<uint64_t>((zinfo->phaseLength * interval)/duration));
             last = now;
         }
     }
@@ -219,25 +217,24 @@ void *simtrace(void *arg) {
     threadInfo *ti = (threadInfo *)arg;
     int tid = ti->tid;
     std::unordered_map<uint64_t, bbl_cache_entry> bbl_cache;
+    TraceReader *reader;
 
-    TraceType type;
     if(ti->type.compare("MEMTRACE") == 0) {
-         type = TraceType::MEMTRACE;
+        reader = new TraceReaderMemtrace(ti->tracefile, ti->binaries);
     }
 #ifdef ZSIM_USE_YT
     else if(ti->type.compare("YT") == 0) {
-        type = TraceType::YT;
+        reader = new TraceReaderYT(ti->tracefile, ti->binaries);
     }
 #endif  // ZSIM_USE_YT
     else {
         panic("Tid %i: Unsupported trace format", tid);
     }
 
-    TraceReader reader(ti->tracefile, type, ti->binaries);
-
     if (!reader) {
         panic("Tid %i: Could not open input files", tid);
     }
+    zinfo->readers[tid] = reader;
 
     std::vector<InstInfo> bbl;
     uint64_t sim_inst = 1;
@@ -247,7 +244,7 @@ void *simtrace(void *arg) {
 
     cores[tid]->join();
 
-    const InstInfo *insi = reader.nextInstruction();
+    const InstInfo *insi = reader->nextInstruction();
     uint64_t last_pid = insi->pid;
     uint64_t last_tid = insi->tid;
 
@@ -260,7 +257,7 @@ void *simtrace(void *arg) {
         /* Skip until we find valid bbl */
         while (insi->ins == NULL && insi->valid) {
             skipped_instructions++;
-            insi = reader.nextInstruction();
+            insi = reader->nextInstruction();
             last_tid = insi->tid;
             last_pid = insi->pid;
         }
@@ -282,7 +279,7 @@ void *simtrace(void *arg) {
             /* In Memtrace, basic blocks can be interrupted by signal handlers and potentially for
              * other reasons which is why we cannot cache basic blocks and need to decode and
              * simulate each instruction individually */
-            bool cache_bbl = type != TraceType::MEMTRACE;
+            bool cache_bbl = ti->type != "MEMTRACE";
 
             while (1) {
                 bbl.push_back(*insi);
@@ -302,7 +299,7 @@ void *simtrace(void *arg) {
                     zinfo->cores[tid]->contextSwitch(-1);
                     last_tid = insi->tid;
                     last_pid = insi->pid;
-                    insi = reader.nextInstruction();
+                    insi = reader->nextInstruction();
                     bbl_interrupted = true;
                     interrupted_bbls++;
                     break;
@@ -313,12 +310,12 @@ void *simtrace(void *arg) {
                     // NOTE: Assuming custom ops are 0-sized and not branches
                     bbl_size += INS_Size(insi->ins);
                     if (INS_ChangeControlFlow(insi->ins)) {
-                      insi = reader.nextInstruction();
+                      insi = reader->nextInstruction();
                       sim_inst++;
                       break;
                     }
                 }
-                insi = reader.nextInstruction();
+                insi = reader->nextInstruction();
                 sim_inst++;
                 if (!insi->valid) {
                     finished = true;
@@ -370,7 +367,7 @@ void *simtrace(void *arg) {
                 if (insi->tid != last_tid || insi->pid != last_pid) {
                     last_tid = insi->tid;
                     last_pid = insi->pid;
-                    insi = reader.nextInstruction();
+                    insi = reader->nextInstruction();
                     zinfo->cores[tid]->contextSwitch(-1);
                     interrupted_bbls++;
                     break;
@@ -385,7 +382,7 @@ void *simtrace(void *arg) {
                     }
                 }
 
-                insi = reader.nextInstruction();
+                insi = reader->nextInstruction();
                 sim_inst++;
                 if (!insi->valid) {
                     finished = true;

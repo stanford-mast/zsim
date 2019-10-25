@@ -32,13 +32,29 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-#ifdef ZSIM_USE_YT
-#include "experimental/users/granta/yt/element-reader.h"
-#endif  // ZSIM_USE_YT
-#include "analyzer.h"
+#include <deque>
+#include <iostream>
+#include <cstring>
+
 extern "C" {
 #include "public/xed/xed-interface.h"
 }
+
+#if __cplusplus < 201402L
+template<typename T, typename... Args>
+static std::unique_ptr<T> make_unique(Args&&... args) {
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+#else
+using std::make_unique;
+#endif
+
+// Indices to 'xed_map_' cached features
+static constexpr int MAP_MEMOPS = 0;
+static constexpr int MAP_UNKNOWN = 1;
+static constexpr int MAP_COND = 2;
+static constexpr int MAP_REP = 3;
+static constexpr int MAP_XED = 4;
 
 enum class CustomOp : uint8_t {
   NONE,
@@ -59,85 +75,70 @@ struct InstInfo {
   bool valid;                     // True until the end of the sequence
 };
 
-enum class TraceType {
-#ifdef ZSIM_USE_YT
-  YT,
-#endif  // ZSIM_USE_YT
-  MEMTRACE
-};
-
 class TraceReader {
  public:
+  enum returnValue : uint8_t{
+    ENTRY_VALID,
+    ENTRY_NOT_FOUND,
+    ENTRY_FIRST,
+    ENTRY_OUT_OF_SEGMENT,
+  };
+  using bufferEntry = std::deque<InstInfo>::iterator;
+
   // The default-constructed object will not return valid instructions
   TraceReader();
   // A trace and single-binary object
-  TraceReader(const std::string &_trace, TraceType _type,
+  TraceReader(const std::string &_trace,
            const std::string &_binary, uint64_t _offset);
   // A trace and multi-binary object which reads 'binary-info.txt' from the
   // input path. This file contains one '<binary> <offset>' pair per line.
-  TraceReader(const std::string &_trace, TraceType _type,
+  TraceReader(const std::string &_trace,
            const std::string &_binary_group_path);
+  TraceReader(const std::string &_trace, const std::string &_binary,
+              uint64_t _offset, uint32_t _buf_size);
+  TraceReader(const std::string &_trace, const std::string &_binary_group_path,
+              uint32_t _buf_size);
   ~TraceReader();
   // A constructor that fails will cause operator! to return true
   bool operator!();
-#ifdef ZSIM_USE_YT
-  void skipAmountIs(uint64_t _count);
-#endif  // ZSIM_USE_YT
   const InstInfo *nextInstruction();
+  const returnValue findPCInSegment(bufferEntry &ref, uint64_t _pc,
+                                    uint64_t _termination_pc);
+  const returnValue findPC(bufferEntry &ref, uint64_t _pc);
+  bufferEntry bufferStart();
 
  private:
-  enum class MTState {
-    INST, MEM1, MEM2
-  };
+  virtual const InstInfo *getNextInstruction() = 0;
+  virtual void binaryGroupPathIs(const std::string &_path) = 0;
+  virtual bool initTrace() = 0;
+  virtual bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size) = 0;
 
- private:
   void init();
-  void traceFileIs(const std::string &_trace, TraceType _type);
+  void init_buffer();
   void binaryFileIs(const std::string &_binary, uint64_t _offset);
-  void binaryGroupPathIs(const std::string &_path);
-  void clearBinaries();
-  bool initTrace();
-  bool initBinary(const std::string &_name, uint64_t _offset, uint64_t _file_offset);
-  void fillCache(uint64_t _vAddr, uint8_t _reported_size);
+
   std::unique_ptr<xed_decoded_inst_t> makeNop(uint8_t _length);
-  bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size);
-  const InstInfo *nextInstructionMT();
-#ifdef ZSIM_USE_YT
-  const InstInfo *nextInstructionYT();
-#endif  // ZSIM_USE_YT
-  bool MTGetNextInstruction(InstInfo *_info, InstInfo *_prior);
-  void MTProcessInst(InstInfo *_info);
-  bool MTTypeIsMem(trace_type_t _type);
-  xed_state_t xed_state_;
+
+ protected:
   std::string trace_;
-  TraceType trace_type_;
-  std::unordered_map<std::string, std::pair<uint8_t *, uint64_t>> binaries_;
-  bool trace_ready_;
-  bool binary_ready_;
-  std::vector<std::tuple<uint64_t, uint64_t, uint8_t *>> sections_;
   InstInfo info_;
   InstInfo invalid_info_;
+  bool trace_ready_;
+  bool binary_ready_;
+  xed_state_t xed_state_;
+  std::unordered_map<std::string, std::pair<uint8_t *, uint64_t>> binaries_;
+  std::vector<std::tuple<uint64_t, uint64_t, uint8_t *>> sections_;
   std::unordered_map<uint64_t, std::tuple<int, bool, bool, bool,
       std::unique_ptr<xed_decoded_inst_t>>> xed_map_;
   int warn_not_found_;
   uint64_t skipped_;
-  //--- YT
-#ifdef ZSIM_USE_YT
-  std::unique_ptr<GenericElementReader> yt_reader_;
-#endif  // ZSIM_USE_YT
-  //--- MT
-  std::unique_ptr<analyzer_t> mt_reader_;
-  reader_t *mt_iter_;
-  reader_t *mt_end_;
-  MTState mt_state_;
-  memref_t mt_ref_;
-  int mt_mem_ops_;
-  uint64_t mt_seq_;
-  uint32_t mt_prior_isize_;
-  InstInfo mt_info_a_;
-  InstInfo mt_info_b_;
-  bool mt_using_info_a_;
-  uint64_t mt_warn_target_;
+  uint32_t buf_size_;
+  std::deque <InstInfo> ins_buffer;
+
+  bool initBinary(const std::string &_name, uint64_t _offset);
+  void clearBinaries();
+  void fillCache(uint64_t _vAddr, uint8_t _reported_size);
+  void traceFileIs(const std::string &_trace);
 };
 
 #endif  // EXPERIMENTAL_USERS_GRANTA_TREMBLER_TREMBLER_H_

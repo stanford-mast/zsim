@@ -52,6 +52,7 @@ class VectorCounter;
 class AccessTraceWriter;
 class YTTracer;  //Only used in zsim_trace due to experimental code
 class TraceDriver;
+class TraceReader;
 template <typename T> class g_vector;
 
 struct ClockDomainInfo {
@@ -189,6 +190,7 @@ struct GlobSimInfo {
 
     //XXX Hack
     CachePrefetcher* prefetcher;
+    TraceReader** readers;
 };
 
 

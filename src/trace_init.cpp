@@ -845,6 +845,7 @@ static void InitSystem(Config& config) {
         //Populate global core info
         assert(zinfo->numCores == coreIdx);
         zinfo->cores = gm_memalign<Core*>(CACHE_LINE_BYTES, zinfo->numCores);
+        zinfo->readers = gm_memalign<TraceReader*>(CACHE_LINE_BYTES, zinfo->numCores);
         coreIdx = 0;
         for (const char* group : coreGroupNames) for (Core* core : coreMap[group]) zinfo->cores[coreIdx++] = core;
 

@@ -30,6 +30,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # Use link-time optimization? It's still a bit buggy, so be careful
     #env['CXX'] = 'g++ -flto -flto-report -fuse-linker-plugin'
     #env['CC'] = 'gcc -flto'
+    env['CC'] = 'gcc7'
+    env['CXX'] = 'g++-7'
     #env["LINKFLAGS"] = " -O3 -finline "
     if useIcc:
         env['CC'] = 'icc'
@@ -62,12 +64,13 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # NOTE (dsm 10 Jan 2013): Tested with Pin 2.10 thru 2.12 as well
     # NOTE: Original Pin flags included -fno-strict-aliasing, but zsim does not do type punning
     # NOTE (dsm 16 Apr 2015): Update flags code to support Pin 2.14 while retaining backwards compatibility
-    env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -fomit-frame-pointer -fno-stack-protector"
+    env["CPPFLAGS"] += " -g -std=c++17 -Wall -Wno-unknown-pragmas -fomit-frame-pointer -fno-stack-protector"
     env["CPPFLAGS"] += " -MMD -DBIGARRAY_MULTIPLIER=1 -DUSING_XED -DTARGET_IA32E -DHOST_IA32E -fPIC -DTARGET_LINUX"
     # NOTE: (mgao Jan 2017): Pin 2.14 requires ABI version of 1002, while gcc-5 and later bumps the API version.
     # Switch to gcc-4.x by using -fabi-version=2
     # FIXME(mgao): update this when upgraded to Pin 3.x
-    env["CPPFLAGS"] += " -fabi-version=2  -D_GLIBCXX_USE_CXX11_ABI=0"
+    # FIXME(hlitz): remove old ABI which is incompatible with drio, only works for memtrace (no PIN)
+    #env["CPPFLAGS"] += " -fabi-version=2  -D_GLIBCXX_USE_CXX11_ABI=0"
 
     # Pin 2.12+ kits have changed the layout of includes, detect whether we need
     # source/include/ or source/include/pin/
@@ -84,19 +87,31 @@ def buildSim(cppFlags, dir, type, pgo=None):
        xedBuildPath = joinpath(XEDPATH, "obj/")
        xedPublicPath = joinpath(XEDPATH, "include/public/xed/")
        drPath = joinpath(DRIOPATH, "clients/drcachesim/")
+       drTracerPath = joinpath(drPath, "tracer/")
        drCommonPath = joinpath(drPath, "common/")
        drReaderPath = joinpath(drPath, "reader/")
+       drIncPath = joinpath(DRIOPATH, "build/include/")
+       drExtIncPath = joinpath(DRIOPATH, "build/ext/include/")	
+       # hlitz: The following is required to complie drio headers
+       env.Append(CPPDEFINES=['LINUX'])
+       env.Append(CPPDEFINES=['X86_64'])
+       env.Append(CPPDEFINES=['VERSION_NUMBER_INTEGER 1'])
     else:
 	xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
 	drPATH = ""
 	drCommonPath = ""
+	drCorePath = ""
+	drIncPath = ""
+	drTracerPath = ""
+	drExtIncPath = ""
     if not os.path.exists(xedPath):
         xedName = "xed"
         xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
         assert os.path.exists(xedPath)
 
 
-    env["CPPPATH"] = [xedPath, xedBuildPath, xedPublicPath, drPath, drCommonPath, drReaderPath,
+    env["CPPPATH"] = [xedPath, xedBuildPath, xedPublicPath, drPath, drCommonPath, drReaderPath, drIncPath,
+    		   drTracerPath, drExtIncPath,
             pinInclDir, joinpath(pinInclDir, "gen"),
             joinpath(PINPATH, "extras/components/include")]
 
@@ -151,9 +166,16 @@ def buildSim(cppFlags, dir, type, pgo=None):
     if TRACE:
         env["LIBPATH"] += [joinpath(XEDPATH, "obj")]
 	env["LIBPATH"] += [joinpath(DRIOPATH, "build/clients/lib64/release")]
-    env["LIBS"] = ["config++"]
+	env["LIBPATH"] += [joinpath(DRIOPATH, "build/api/bin/")]
+	env["LIBPATH"] += [joinpath(DRIOPATH, "build/ext/lib64/release")]
+	env["LIBPATH"] += [joinpath(DRIOPATH, "build/lib64/release")]
+	env["LIBPATH"] += [joinpath(DRIOPATH, "build/lib64/")]	
+    env["LIBS"] = ["config++","dl"]
+    #env["LIBS"] += ["drcovlib","drcontainers","drreg","drsyms","drutil","drwrap","drx","drpreload","dynamorio",]
+    #env["LIBS"] += ["drmgr"]	
 
-    env["LINKFLAGS"] = ""
+    env["LINKFLAGS"]=['-Wl,--start-group']
+    #env["LINKFLAGS"] = ""
 
     if useIcc:
         # icc libs

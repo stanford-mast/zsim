@@ -1,30 +1,17 @@
 #include "trace_reader.h"
-#include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <mutex>
-#include <utility>
-#ifdef ZSIM_USE_YT
-#include "experimental/users/granta/yt/chunkio/xz-chunk-reader.h"
-#include "experimental/users/granta/yt/element-reader.h"
-#endif  // ZSIM_USE_YT
+
 #include "elf.h"
 #include "log.h"
-
-//analyzer_t is linked via a static lib which creates problems with the zsim shared library
-//I think it can be fixed by building a memtrace analzyer shared lib or by ?
-#include "/home/hlitz/dynamorio/clients/drcachesim/analyzer.cpp"
-
-// Remove and include <memory> when using C++14 or later
-template<typename T, typename... Args>
-static std::unique_ptr<T> make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
 
 using std::endl;
 using std::get;
@@ -37,42 +24,40 @@ using std::unique_ptr;
 static bool xedInitDone = false;
 static std::mutex initMutex;
 
-// Indices to 'xed_map_' cached features
-static constexpr int MAP_MEMOPS = 0;
-static constexpr int MAP_UNKNOWN = 1;
-static constexpr int MAP_COND = 2;
-static constexpr int MAP_REP = 3;
-static constexpr int MAP_XED = 4;
-
 // A non-reader
 TraceReader::TraceReader()
-  : trace_ready_(false), binary_ready_(false), skipped_(0),
-  mt_warn_target_(0) {
+    : trace_ready_(false), binary_ready_(false), skipped_(0) {
   init();
 }
 
 // Trace + single binary
-TraceReader::TraceReader(const std::string &_trace, TraceType _type,
+TraceReader::TraceReader(const std::string &_trace,
                    const std::string &_binary, uint64_t _offset)
-  : trace_type_(_type), trace_ready_(false), binary_ready_(true),
-  warn_not_found_(1), skipped_(0), mt_iter_(nullptr), mt_end_(nullptr),
-  mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
-  mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
+  : trace_ready_(false), binary_ready_(true),
+    warn_not_found_(1), skipped_(0), buf_size_(0) {
   init();
   binaryFileIs(_binary, _offset);
-  traceFileIs(_trace, _type);
 }
 
 // Trace + multiple binaries
-TraceReader::TraceReader(const std::string &_trace, TraceType _type,
-                   const std::string &_binary_group_path)
-  : trace_type_(_type), trace_ready_(false), binary_ready_(true),
-  warn_not_found_(1), skipped_(0), mt_iter_(nullptr), mt_end_(nullptr),
-  mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
-  mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
+TraceReader::TraceReader(const std::string &_trace,
+                         const std::string &_binary_group_path)
+  : trace_ready_(false), binary_ready_(true),
+    warn_not_found_(1), skipped_(0), buf_size_(0) {
   init();
-  binaryGroupPathIs(_binary_group_path);
-  traceFileIs(_trace, _type);
+}
+
+TraceReader::TraceReader(const std::string &_trace, const std::string &_binary,
+                         uint64_t _offset, uint32_t _buf_size)
+    : TraceReader(_trace, _binary, _offset) {
+  buf_size_ = _buf_size;
+}
+
+TraceReader::TraceReader(const std::string &_trace,
+                         const std::string &_binary_group_path,
+                         uint32_t _buf_size)
+    : TraceReader(_trace, _binary_group_path) {
+  buf_size_ = _buf_size;
 }
 
 TraceReader::~TraceReader() {
@@ -80,48 +65,11 @@ TraceReader::~TraceReader() {
   if (skipped_ > 0) {
     warn("Skipped %lu stray memory references\n", skipped_);
   }
-  if (mt_warn_target_ > 0) {
-    warn("Set %lu conditional branches to 'not-taken' due to pid/tid gaps\n",
-         mt_warn_target_);
-  }
 }
 
 bool TraceReader::operator!() {
   // Return true if there was an initialization error
   return !(trace_ready_ && binary_ready_);
-}
-
-#ifdef ZSIM_USE_YT
-void TraceReader::skipAmountIs(uint64_t _count) {
-  // Skip forward '_count' instructions
-  if (_count == 0) {
-    return;
-  }
-  uint64_t skipped = 0;
-  Element e = yt_reader_->nextElement();
-  while (e.valid) {
-    if (Trace::isInst(e.type)) {
-      skipped++;
-    }
-    if (skipped == _count) {
-      break;
-    }
-    e = yt_reader_->nextElement();
-  }
-}
-#endif  // ZSIM_USE_YT
-
-const InstInfo *TraceReader::nextInstruction() {
-  if (trace_type_ == TraceType::MEMTRACE) {
-    return nextInstructionMT();
-#ifdef ZSIM_USE_YT
-  } else if (trace_type_ == TraceType::YT) {
-    return nextInstructionYT();
-#endif  // ZSIM_USE_YT
-  } else {
-      warn("Unknown trace format type");
-      return nullptr;
-  }
 }
 
 void TraceReader::init() {
@@ -135,18 +83,6 @@ void TraceReader::init() {
 
   // Set the XED machine mode to 64-bit
   xed_state_init2(&xed_state_, XED_MACHINE_MODE_LONG_64, XED_ADDRESS_WIDTH_64b);
-
-#ifdef ZSIM_USE_YT
-  // YT
-  info_.custom_op = CustomOp::NONE;  // Future feature
-  info_.valid = true;
-#endif  // ZSIM_USE_YT
-
-  // MT
-  mt_info_a_.custom_op = CustomOp::NONE;
-  mt_info_b_.custom_op = CustomOp::NONE;
-  mt_info_a_.valid = true;
-  mt_info_b_.valid = true;
 
   // Clear the 'invalid' record (memset() would do too)
   invalid_info_.pc = 0;
@@ -162,10 +98,11 @@ void TraceReader::init() {
   invalid_info_.taken = false;
   invalid_info_.unknown_type = false;
   invalid_info_.valid = false;
+
+  init_buffer();
 }
 
-void TraceReader::traceFileIs(const std::string &_trace, TraceType _type) {
-  trace_type_ = _type;
+void TraceReader::traceFileIs(const std::string &_trace) {
   trace_ = _trace;
   trace_ready_ = initTrace();
 }
@@ -176,71 +113,7 @@ void TraceReader::binaryFileIs(const std::string &_binary, uint64_t _offset) {
     // An absent binary is allowed
     binary_ready_ = true;
   } else {
-    binary_ready_ = initBinary(_binary, _offset, 0);
-  }
-}
-
-void TraceReader::binaryGroupPathIs(const std::string &_path) {
-  clearBinaries();
-  binary_ready_ = true;  // An absent binary is allowed
-  if (!_path.empty()) {
-    std::string info_name = _path + "/raw/modules.log";
-    ifstream info_file(info_name);
-    if (!info_file.is_open()) {
-      panic("Could not open binary collection info file '%s': %s",
-            info_name.c_str(), strerror(errno));
-    }
-    std::string name;
-    std::string id;
-    std::string containing_id;
-    std::string start;
-    std::string end;
-    std::string entry;
-    std::string offset;
-    std::string custom;
-    std::string path;
-    uint64_t offseti, starti, idi;
-    char s[10000];
-    
-    uint64_t cur_id = 0;
-    bool in_elf = false;
-    //skip 2 header lines
-    info_file.getline(s, 10000);
-    info_file.getline(s, 10000);
-    while(info_file.getline(s, 10000)){
-      
-      std::stringstream ss;
-      ss.str(std::string(s));
-      ss >>  id >> containing_id >> start >> end >> entry >> offset >> custom >> path;
-      if (id.size() == 0){
-	continue;
-      }
-      id.pop_back();
-      idi = atoi(id.c_str());
-
-      if (custom.find("ELF")!=std::string::npos){
-	if (!in_elf)
-	  cur_id++;
-	in_elf = true;
-	continue;
-      }
-      if (idi != cur_id){	
-	continue;
-      }
-      start.pop_back();
-      std::stringstream sa;
-      sa.str(start);
-      sa >> std::hex >> starti;
-
-      offset.pop_back();
-      std::stringstream of;
-      of.str(offset);
-      of >> std::hex >> offseti;
-      binary_ready_ &= initBinary(path, starti, offseti);
-
-      cur_id++;
-      in_elf = false;
-    }
+    binary_ready_ = initBinary(_binary, _offset);
   }
 }
 
@@ -256,51 +129,7 @@ void TraceReader::clearBinaries() {
   sections_.clear();
 }
 
-bool TraceReader::initTrace() {
-  if (trace_type_ == TraceType::MEMTRACE) {
-    mt_reader_ = make_unique<analyzer_t>(trace_);
-    if (!(*mt_reader_)) {
-      panic("Failure starting memtrace reader");
-      return false;
-    }
-    mt_iter_ = &(mt_reader_->begin());
-    mt_end_ = &(mt_reader_->end());
-
-    // Set info 'A' to the first complete instruction.
-    // It will initially lack branch target information.
-    MTGetNextInstruction(&mt_info_a_, &mt_info_b_);
-    mt_using_info_a_ = false;
-    return true;
-#ifdef ZSIM_USE_YT
-  }
-    else if (trace_type_ == TraceType::YT) {
-    // Determine the trace type by the file extension
-      std::string name = trace_;
-    std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-    bool isRawYT = name.size() > 3 &&
-        (name.compare(name.size() - 3, 3, ".yt") == 0);
-    bool isXzYT = name.size() > 6 &&
-        (name.compare(name.size() - 6, 6, ".yt.xz") == 0);
-    if (isXzYT) {
-      yt_reader_ = make_unique<ElementReader<Util::XzChunkReader>>(
-          trace_, 100*1048576UL);
-    } else if (isRawYT) {
-      yt_reader_ = make_unique<ElementReader<Util::BasicChunkReader>>(
-          trace_, 100*1048576UL);
-    } else {
-      panic("Input file '%s' doesn't appear to be in the YT format (.yt or .yt.xz)",
-            trace_.c_str());
-      return false;
-    }
-    info_.pid = 0;  // YT supports TIDs but not PIDs
-    return true;
-#endif  // ZSIM_USE_YT
-  } else {
-    return false;
-  }
-}
-
-bool TraceReader::initBinary(const std::string &_name, uint64_t _offset, uint64_t _file_offset) {
+bool TraceReader::initBinary(const std::string &_name, uint64_t _offset) {
   // Load the input file to memory
   int fd = open(_name.c_str(), O_RDONLY);
   if (fd == -1) {
@@ -347,7 +176,8 @@ bool TraceReader::initBinary(const std::string &_name, uint64_t _offset, uint64_
     panic("ELF file is too small for section headers");
     return false;
   }
-  Elf64_Shdr* shdr = reinterpret_cast<Elf64_Shdr*>(data + shoff + _file_offset);
+
+  Elf64_Shdr* shdr = reinterpret_cast<Elf64_Shdr*>(data + shoff);
   for (Elf64_Half i = 0; i < hdr->e_shnum; i++) {
     if ((shdr[i].sh_type == SHT_PROGBITS) &&
         (shdr[i].sh_flags & SHF_EXECINSTR)) {
@@ -359,7 +189,7 @@ bool TraceReader::initBinary(const std::string &_name, uint64_t _offset, uint64_
         return false;
       }
       // Save the starting virtual address, size, and location in memory
-      uint64_t base_addr = shdr[i].sh_addr + _offset;
+      uint64_t base_addr = shdr[i].sh_addr  + _offset;
       sections_.emplace_back(base_addr, sec_size, data + sec_offset);
     }
   }
@@ -463,254 +293,49 @@ unique_ptr<xed_decoded_inst_t> TraceReader::makeNop(uint8_t _length) {
   return ptr;
 }
 
-bool TraceReader::locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size) {
-  // Find the binary image bytes corresponding to a virtual address
-  uint64_t secBaseVAddr, secSize;
-  uint8_t *secLoc;
-  for (auto &section : sections_) {
-    tie(secBaseVAddr, secSize, secLoc) = section;
-    if ((secBaseVAddr <= _vaddr) && ((secBaseVAddr + secSize) > _vaddr)) {
-      *_loc = secLoc + (_vaddr - secBaseVAddr);
-      *_size = secSize - (_vaddr - secBaseVAddr);
-      return true;
+void TraceReader::init_buffer() {
+    //Push one dummy entry so we can pop in nextInstruction()
+    ins_buffer.emplace_back(InstInfo());
+
+    for (uint32_t i = 0; i < buf_size_; i++) {
+        ins_buffer.emplace_back(*getNextInstruction());
     }
-  }
-  return false;
 }
 
-const InstInfo *TraceReader::nextInstructionMT() {
-  InstInfo &info = (mt_using_info_a_ ? mt_info_a_ : mt_info_b_);
-  InstInfo &prior = (mt_using_info_a_ ? mt_info_b_ : mt_info_a_);
-  mt_using_info_a_ = !mt_using_info_a_;
-  if (MTGetNextInstruction(&info, &prior)) {
-    return &prior;
-  } else {
-    return &invalid_info_;
-  }
+const InstInfo *TraceReader::nextInstruction() {
+    ins_buffer.pop_front();
+    ins_buffer.emplace_back(*getNextInstruction());
+    return &ins_buffer.front();
 }
 
-#ifdef ZSIM_USE_YT
-const InstInfo *TraceReader::nextInstructionYT() {
-  // Grab the next instruction element.
-  //
-  // YT guarantees that data elements follow their corresponding instruction
-  // elements without gaps, even if the trace interleaves multiple threads.
-  //
-  // NOTE: Data-only YT traces are not supported! This tool must have an
-  // instruction trace or instruction + data trace.
-  Element e = yt_reader_->nextElement();
-  while (e.valid) {
-    if (Trace::isInst(e.type)) {
-      break;
-    } else {
-      // Print an error if the stray element belongs to a known instruction,
-      // or silently skip if it's part of an unknown instruction.
-      if (xed_map_.find(e.inst) == xed_map_.end()) {
-        fillCache(e.inst, e.isize);
-      }
-      if (!get<MAP_UNKNOWN>(xed_map_.at(e.inst))) {
-        warn("Unexpected non-instruction element of type %u, PC: 0x%lx",
-             static_cast<uint32_t>(Trace::value(e.type)), e.inst);
-      }
-    }
-    e = yt_reader_->nextElement();
-  }
-  if (!e.valid) {
-    return &invalid_info_;
-  }
-  // Get the XED info from the cache, creating it if needed
-  auto xed_map_iter = xed_map_.find(e.inst);
-  if (xed_map_iter == xed_map_.end()) {
-    fillCache(e.inst, e.isize);
-    xed_map_iter = xed_map_.find(e.inst);
-    assert((xed_map_iter != xed_map_.end()));
-  }
-  int n_mem_ops;
-  bool unknown_type;
-  xed_decoded_inst_t *xed_ins;
-  auto &xed_tuple = (*xed_map_iter).second;
-  tie(n_mem_ops, unknown_type, ignore, ignore, ignore) = xed_tuple;
-  xed_ins = get<MAP_XED>(xed_tuple).get();
-  info_.tid = e.tid;
-  info_.pc = e.inst;
-  info_.ins = xed_ins;
-  info_.target = e.target;  // Target address, valid for call/jmp/ret/etc.
-  info_.mem_addr[0] = 0;
-  info_.mem_addr[1] = 0;
-  info_.mem_used[0] = false;
-  info_.mem_used[1] = false;
-  info_.taken = e.taken;
-  info_.unknown_type = unknown_type;
-  // Check for memory operands which come in later records
-  assert(n_mem_ops <= 2);
-  for (int i = 0; i < n_mem_ops; i++) {
-    e = yt_reader_->nextElement();
-    if (!e.valid) {
-      warn("Incomplete memory records after instruction 0x%lx", e.inst);
-      info_.valid = false;  // Applies to all future records as well
-      break;
-    }
-    assert(e.valid);
-    assert(Trace::isData(e.type));
-    assert(e.inst == info_.pc);
-    info_.mem_addr[i] = e.target;
-    info_.mem_used[i] = true;
-  }
-  return &info_;
-}
-#endif  // ZSIM_USE_YT
-
-bool TraceReader::MTGetNextInstruction(InstInfo *_info, InstInfo *_prior) {
-  uint32_t prior_isize = mt_prior_isize_;
-  bool complete = false;
-  while (*mt_iter_ != *mt_end_) {
-    switch (mt_state_) {
-      case (MTState::INST):
-        mt_ref_ = **mt_iter_;
-        if (type_is_instr(mt_ref_.instr.type)) {
-          MTProcessInst(_info);
-          if (mt_mem_ops_ > 0) {
-            mt_state_ = MTState::MEM1;
-          } else {
-            complete = true;
-          }
-        } else if (MTTypeIsMem(mt_ref_.data.type)) {
-          // Skip flush and thread exit types, patch rep instructions, and
-          // silently ignore memory operands of unknown instructions
-          if (!_prior->unknown_type) {
-            bool is_rep = get<MAP_REP>(xed_map_.at(_prior->pc));
-            if (is_rep &&
-                ((uint32_t)mt_ref_.data.pid == _prior->pid) &&
-                ((uint32_t)mt_ref_.data.tid == _prior->tid) &&
-                (mt_ref_.data.pc == _prior->pc)) {
-              *_info = *_prior;
-              _info->mem_addr[0] = mt_ref_.data.addr;
-              _info->mem_used[0] = true;
-              if (mt_mem_ops_ > 1) {
-                mt_state_ = MTState::MEM2;
-              } else {
-                _info->mem_addr[1] = 0;
-                _info->mem_used[1] = false;
-                complete = true;
-              }
-            } else {
-              if (skipped_ == 0) {
-                warn("Stray memory record detected at seq. %lu: PC: 0x%lx, "
-                     "PID: %lu, TID: %lu, Addr: 0x%lx. "
-                     "Suppressing further messages.\n",
-                     mt_seq_, mt_ref_.data.pc, mt_ref_.data.pid,
-                     mt_ref_.data.tid, mt_ref_.data.addr);
-              }
-              skipped_++;
-            }
-          }
+//Find the next buffer entry, starting from ref, that matches the given PC
+const TraceReader::returnValue TraceReader::findPC(bufferEntry &ref,
+                                                   uint64_t _pc) {
+    for (; ref != ins_buffer.end(); ref++) {
+        if (ref->pc == _pc) {
+            return ENTRY_VALID;
         }
-        break;
-      case (MTState::MEM1):
-        mt_ref_ = **mt_iter_;
-        if (MTTypeIsMem(mt_ref_.data.type)) {
-          if (((uint32_t)_info->pid == mt_ref_.data.pid) &&
-              ((uint32_t)_info->tid == mt_ref_.data.tid) &&
-              (_info->pc == mt_ref_.data.pc)) {
-            _info->mem_addr[0] = mt_ref_.data.addr;
-            _info->mem_used[0] = true;
-            if (mt_mem_ops_ > 1) {
-              mt_state_ = MTState::MEM2;
-            } else {
-              mt_state_ = MTState::INST;
-              complete = true;
-            }
-          } else {
-            warn("Unexpected PID/TID/PC switch following 0x%lx\n", _info->pc);
-            mt_state_ = MTState::INST;
-          }
-        } else {
-          warn("Expected data but found type '%s'\n",
-               trace_type_names[mt_ref_.data.type]);
-          mt_state_ = MTState::INST;
-        }
-        break;
-      case (MTState::MEM2):
-        mt_ref_ = **mt_iter_;
-        if (MTTypeIsMem(mt_ref_.data.type)) {
-          if (((uint32_t)_info->pid == mt_ref_.data.pid) &&
-              ((uint32_t)_info->tid == mt_ref_.data.tid) &&
-              (_info->pc == mt_ref_.data.pc)) {
-            _info->mem_addr[1] = mt_ref_.data.addr;
-            _info->mem_used[1] = true;
-            assert(mt_mem_ops_ <= 2);
-            mt_state_ = MTState::INST;
-            complete = true;
-          } else {
-            warn("Unexpected PID/TID/PC switch following 0x%lx\n", _info->pc);
-            mt_state_ = MTState::INST;
-          }
-        } else {
-          warn("Expected data2 but found type '%s'\n",
-               trace_type_names[mt_ref_.data.type]);
-          mt_state_ = MTState::INST;
-        }
-        break;
     }
-    mt_seq_++;
-    ++(*mt_iter_);
-    if (complete) {
-      break;
-    }
-  }
-  // Compute the branch target information for the prior instruction
-  _prior->target = _info->pc;  // TODO(granta): Invalid for pid/tid switch
-  if (_prior->taken) {  // currently set iif conditional branch
-    bool non_seq = _info->pc != (_prior->pc + prior_isize);
-    bool new_gid = (_prior->tid != _info->tid) || (_prior->pid != _info->pid);
-    if (new_gid) {
-      // TODO(granta): If there are enough of these, it may make sense to
-      // delay conditional branch instructions until the thread resumes even
-      // though this alters the apparent order of the trace.
-      // (Seeking ahead to resolve the branch info is a non-starter.)
-      if (mt_warn_target_ == 0) {
-        warn("Detected a conditional branch preceding a pid/tid change "
-             "at seq. %lu. Assuming not-taken. Suppressing further "
-             "messages.\n", mt_seq_ - 1);
-      }
-      mt_warn_target_++;
-      non_seq = false;
-    }
-    _prior->taken = non_seq;
-  }
-
-  _info->valid &= complete;
-  return complete;
+    return ENTRY_NOT_FOUND;
 }
 
-void TraceReader::MTProcessInst(InstInfo *_info) {
-  // Get the XED info from the cache, creating it if needed
-  auto xed_map_iter = xed_map_.find(mt_ref_.instr.addr);
-  if (xed_map_iter == xed_map_.end()) {
-    fillCache(mt_ref_.instr.addr, mt_ref_.instr.size);
-    xed_map_iter = xed_map_.find(mt_ref_.instr.addr);
-    assert((xed_map_iter != xed_map_.end()));
-  }
-  bool unknown_type, cond_branch;
-  xed_decoded_inst_t *xed_ins;
-  auto &xed_tuple = (*xed_map_iter).second;
-  tie(mt_mem_ops_, unknown_type, cond_branch, ignore, ignore) = xed_tuple;
-  mt_prior_isize_ = mt_ref_.instr.size;
-  xed_ins = get<MAP_XED>(xed_tuple).get();
-  _info->pc = mt_ref_.instr.addr;
-  _info->ins = xed_ins;
-  _info->pid = mt_ref_.instr.pid;
-  _info->tid = mt_ref_.instr.tid;
-  _info->target = 0;  // Set when the next instruction is evaluated
-  _info->taken = cond_branch;  // Patched when the next instruction is evaluated
-  _info->mem_addr[0] = 0;
-  _info->mem_addr[1] = 0;
-  _info->mem_used[0] = false;
-  _info->mem_used[1] = false;
-  _info->unknown_type = unknown_type;
+const TraceReader::returnValue TraceReader::findPCInSegment(bufferEntry &ref,
+                                                            uint64_t _pc,
+                                                     uint64_t _termination_pc) {
+  if (ref == ins_buffer.end())
+      return ENTRY_NOT_FOUND;
+
+  for (ref++; ref != ins_buffer.end(); ref++) {
+        if (ref->pc == _pc) {
+            return ENTRY_VALID;
+        }
+        else if (ref->pc == _termination_pc) {
+            return ENTRY_OUT_OF_SEGMENT;
+        }
+    }
+    return ENTRY_NOT_FOUND;
 }
 
-bool TraceReader::MTTypeIsMem(trace_type_t _type) {
-  return ((_type == TRACE_TYPE_READ) || (_type == TRACE_TYPE_WRITE) ||
-          type_is_prefetch(_type));
+TraceReader::bufferEntry TraceReader::bufferStart() {
+    return ins_buffer.begin();
 }
