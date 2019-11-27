@@ -431,8 +431,10 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                     if(!(degree > 0 && degree < 5)) {
                         panic("Prefetch degree must be in between 1 and 4");
                     }
+		    g_string target_cache =
+                        config.get<const char*>(prefix + "target", "");
                     cg[i][0] = new StreamPrefetcher(pfName, streams,
-                                                    log_distance, degree);
+                                                    log_distance, degree, target_cache);
                 }
             }
             return cgp;

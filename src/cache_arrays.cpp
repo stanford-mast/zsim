@@ -26,10 +26,12 @@
 #include "cache_arrays.h"
 #include "hash.h"
 #include "repl_policies.h"
+#include <inttypes.h>
 
 #include "zsim.h"
 #include "cache_prefetcher.h"
 
+using namespace std;
 /* Set-associative array implementation */
 
 SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf) : rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc)  {
@@ -71,7 +73,7 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
 			profPrefSavedCycles.inc(array[id].availCycle - array[id].startCycle);
 		    }
 		}
-                //line is in flight, compensate for potential OOO
+		 //line is in flight, compensate for potential OOO
                 else if (req->cycle < array[id].startCycle) {
                     *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
                     //In case of OOO, fix state by storing cycles of the earlier access
@@ -94,7 +96,6 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
                         profPrefHit.inc();
                     }
                     array[id].prefetch = false;
-
                     // XXX hack:
                     if (zinfo->prefetcher) {
                         MemReq r = *req;
@@ -115,7 +116,6 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
     uint32_t candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
 
     *wbLineAddr = array[candidate].addr;
-
     return candidate;
 }
 

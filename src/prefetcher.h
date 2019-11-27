@@ -33,6 +33,14 @@
 #include "memory_hierarchy.h"
 #include "stats.h"
 
+#include "cache.h"
+#include "cache_prefetcher.h"
+#include "filter_cache.h"
+#include <iostream>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include "zsim.h"
 /* Prefetcher models: Basic operation is to interpose between cache levels, issue additional accesses,
  * and keep a small table with delays; when the demand access comes, we do it and account for the
  * latency as when it was first fetched (to avoid hit latencies on partial latency overlaps).
@@ -58,7 +66,7 @@ class SatCounter {
  * FIXME: For now, mostly hardcoded; 64-line entries (4KB w/64-byte lines), fixed granularities, etc.
  * TODO: Adapt to use weave models
  */
-class StreamPrefetcher : public BaseCache {
+class StreamPrefetcher : public CachePrefetcher {
     private:
         struct Entry {
             // Two competing strides; at most one active
@@ -106,32 +114,26 @@ class StreamPrefetcher : public BaseCache {
         Counter profAccesses, profPrefetches, profDoublePrefetches,
             profTriplePrefetches, profQuadPrefetches, profPageHits, profHits,
             profShortHits, profStrideSwitches, profLowConfAccs;
+        Counter prof_emitted_prefetches_;
 
-        g_vector<MemObject*> parents;
-        MemObject* parent;
-        BaseCache* child;
-        g_vector<BaseCache*> children;
-        uint32_t childId;
-        g_string name;
+        g_string name_;
         uint32_t streams; //Default 16. Number of streams being monitored
         uint32_t degree;  //Default 2. agressiveness, number of prefetches issued at once until we reach distance
+        void schedReq(uint32_t srcId, uint64_t lineAddr);
 
     public:
-        explicit StreamPrefetcher(const g_string& _name, uint32_t _streams,
-                                  uint32_t _log_distance, uint32_t _degree) :
-            timestamp(0), log_distance(_log_distance),
+        explicit StreamPrefetcher(const g_string& _name,
+			          uint32_t _streams,
+			          uint32_t _log_distance,uint32_t _degree, const g_string& _target) :
+            CachePrefetcher(_name, _target), timestamp(0), log_distance(_log_distance),
             distance(1 << log_distance), tag(_streams),
-            array(_streams, distance), name(_name),
-            streams(_streams), degree(_degree) {};
+            array(_streams, distance),name_(_name),
+            streams(_streams), degree(_degree)  {};
+
 
         void initStats(AggregateStat* parentStat) override;
-        const char* getName() override { return name.c_str();}
-        void setParents(uint32_t _childId, const g_vector<MemObject*>& _parents, Network* _network) override;
-        g_vector<MemObject*>* getParents() override;
-        void setChildren(const g_vector<BaseCache*>& children, Network* network) override;
-        g_vector<BaseCache*>* getChildren() override;
-
         uint64_t access(MemReq& req) override;
+        void prefetch(MemReq& _req) override;
         uint64_t invalidate(const InvReq& req) override;
 };
 
