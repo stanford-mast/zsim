@@ -102,10 +102,6 @@ void CachePrefetcher::postInit() {
         panic("Prefetcher '%s' could not find target cache with pattern '%s'", name_.c_str(), target_prefix_.c_str());
     }
 
-    if (i_caches_.empty() || d_caches_.empty()) {
-        panic("Prefetcher '%s' couldn't find any terminal caches", name_.c_str());
-    }
-
     //Convert the filter cache levels to distances from the target
     for (auto& icache : i_caches_) {
         //Depending on the hierarchy, some of these slots may be empty/invalid,
