@@ -56,7 +56,7 @@ class MD1Memory : public MemObject {
         double smoothedPhaseAccesses;
         uint32_t zeroLoadLatency;
         uint32_t curLatency;
-
+        double latMultiplier;
         PAD();
 
         Counter profReads;
@@ -92,6 +92,7 @@ class MD1Memory : public MemObject {
         uint64_t access(MemReq& req);
 
         const char* getName() {return name.c_str();}
+        double getLoad() { return latMultiplier;}
 
     private:
         void updateLatency();

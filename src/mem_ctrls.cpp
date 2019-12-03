@@ -61,7 +61,7 @@ uint64_t SimpleMemory::access(MemReq& req) {
 
 
 MD1Memory::MD1Memory(uint32_t requestSize, uint32_t megacyclesPerSecond, uint32_t megabytesPerSecond, uint32_t _zeroLoadLatency, g_string& _name)
-    : zeroLoadLatency(_zeroLoadLatency), name(_name)
+    : zeroLoadLatency(_zeroLoadLatency), latMultiplier(1.0), name(_name)
 {
     lastPhase = 0;
 
@@ -93,7 +93,7 @@ void MD1Memory::updateLatency() {
         profClampedLoads.inc();
     }
 
-    double latMultiplier = 1.0 + 0.5*load/(1.0 - load); //See Pollancek-Khinchine formula
+    latMultiplier = 1.0 + 0.5*load/(1.0 - load); //See Pollancek-Khinchine formula
     curLatency = (uint32_t)(latMultiplier*zeroLoadLatency);
 
     //info("%s: Load %.2f, latency multiplier %.2f, latency %d", name.c_str(), load, latMultiplier, curLatency);
@@ -144,4 +144,3 @@ uint64_t MD1Memory::access(MemReq& req) {
     }
     return req.cycle + ((req.type == PUTS)? 0 /*PUTS is not a real access*/ : curLatency);
 }
-
