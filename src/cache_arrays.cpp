@@ -52,61 +52,162 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     objStats->append(&profPrefLateTotalCycles);
     profPrefSavedCycles.init("prefSavedCyc", "Total cycles saved by hitting a prefetched line (also if late)");
     objStats->append(&profPrefSavedCycles);
+
+    profPrefInCache.init("prefInCache", "Prefetch that hits cache");
+    objStats->append(&profPrefInCache);
+    profPrefNotInCache.init("prefNotInCache", "Prefetch that misses cache");
+    objStats->append(&profPrefNotInCache);
+    profPrefPostInsert.init("prefPostInsert", "Prefetch that leads to replacement");
+    objStats->append(&profPrefPostInsert);
+    profPrefReplacePref.init("prefReplacePref", "Prefetch replacing an already prefetched line");
+    objStats->append(&profPrefReplacePref);
+
+    profPrefHitPref.init("prefHitPref", "Prefetch hitting an already prefetched line");
+    objStats->append(&profPrefHitPref);
+    profPrefAccesses.init("prefAccesses", "Total number of accesses that are prefetches");
+    objStats->append(&profPrefAccesses);
     profPrefInaccurateOOO.init("prefInaccurateOOO", "Number of useless prefetches due to OOO");
+
+#ifdef MONITOR_MISS_PCS
+    profMissPc.init("highMissPc", "Load/Store PCs with the highest MPKI", MONITORED_PCS);
+    objStats->append(&profMissPc);
+    profMissPcNum.init("highMissPcNum", "Number of misses of Load/Store PCs with the highest MPKI", MONITORED_PCS);
+    objStats->append(&profMissPcNum);
+    profHitPc.init("highPrefHitPc", "Load/Store PCs with the highest hit rate", MONITORED_PCS);
+    objStats->append(&profHitPc);
+    profHitPcNum.init("highHitPcNum", "Number of misses of Load/Store PCs with the highest hit rate", MONITORED_PCS);
+    objStats->append(&profHitPcNum);
+
+    profLatePc.init("highPrefLatePc", "Load/Store PCs with the highest late rate", MONITORED_PCS);
+    objStats->append(&profLatePc);
+    profLatePcNum.init("highLatePcNum", "Number of misses of Load/Store PCs with the highest late rate", MONITORED_PCS);
+    objStats->append(&profLatePcNum);
+    profEarlyPc.init("highPrefEarlyPc", "Load/Store PCs with the highest too early rate", MONITORED_PCS);
+    objStats->append(&profEarlyPc);
+    profEarlyPcNum.init("highEarlyPcNum", "Number of misses of Load/Store PCs with the highest too early rate", MONITORED_PCS);
+    objStats->append(&profEarlyPcNum);
+#endif
+
+    profHitDelayCycles.init("hitDelayCycles" , "Delay cycles on an inflight hit");
+    objStats->append(&profHitDelayCycles);
     parentStat->append(objStats);
 }
 
 int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle) {
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
+    //Only update prefetch stats if skip is zero (!req->prefetch)
+    if (isHWPrefetch(req)) {
+        profPrefAccesses.inc();
+    }
 
     for (uint32_t id = first; id < first + assoc; id++) {
-        if (array[id].addr ==  lineAddr) {
-            if (updateReplacement) rp->update(id, req);
-            if (req != nullptr) {
-                //cache hit, line is in the cache
-                if (req->cycle > array[id].availCycle) {
-                    *availCycle = req->cycle;
-		    if (array[id].prefetch) {
-			profPrefSavedCycles.inc(array[id].availCycle - array[id].startCycle);
-		    }
-		}
-                //line is in flight, compensate for potential OOO
-                else if (req->cycle < array[id].startCycle) {
+        if (array[id].addr == lineAddr) {
+            //Lookup without request or prefetch skipping this level
+            if (!req || req->prefetch) {
+                *availCycle = array[id].availCycle;
+                return id;
+            }
+            if (isHWPrefetch(req)) {
+                profPrefInCache.inc();
+            }
+
+            if (updateReplacement && !req->prefetch) rp->update(id, req);
+
+            //cache hit, line is in the cache
+            if (req->cycle >= array[id].availCycle) {
+                *availCycle = req->cycle;
+                if (array[id].prefetch && isDemandLoad(req)) {
+                    profPrefHit.inc();
+                    profPrefSavedCycles.inc(array[id].availCycle - array[id].startCycle);
+#ifdef MONITOR_MISS_PCS
+                    if (MONITORED_PCS && isDemandLoad(req)) {
+                        trackLoadPc(req->pc, hit_pcs, profHitPc, profHitPcNum);
+                    }
+#endif
+                    array[id].prefetch = false;
+                }
+                else if (array[id].prefetch && isHWPrefetch(req)) {
+                    profPrefHitPref.inc();
+                }
+            }
+            //line is in flight, compensate for potential OOO
+            else {
+                if (req->cycle < array[id].startCycle) {
                     *availCycle = array[id].availCycle - (array[id].startCycle - req->cycle);
                     //In case of OOO, fix state by storing cycles of the earlier access
                     array[id].availCycle = *availCycle;
                     array[id].startCycle = req->cycle;
-                    profPrefInaccurateOOO.inc();
+                    if(isDemandLoad(req)) {
+                        profPrefInaccurateOOO.inc();
+                    }
                 } else {
                     *availCycle = array[id].availCycle;
-		    if (array[id].prefetch) {
-			profPrefSavedCycles.inc(req->cycle - array[id].startCycle);
-			assert((req->cycle - array[id].startCycle) <= (array[id].availCycle - array[id].startCycle));
-		    }
                 }
-                if (updateReplacement && array[id].prefetch && !(req->flags & MemReq::SPECULATIVE)) {
-                    if (array[id].availCycle > req->cycle) {
-                        profPrefLateMiss.inc();
-                        profPrefLateTotalCycles.inc(*availCycle - req->cycle);
+                if (array[id].prefetch && isDemandLoad(req)) {
+                    profPrefLateMiss.inc();
+                    profPrefLateTotalCycles.inc(*availCycle - req->cycle);
+                    profPrefSavedCycles.inc(req->cycle - array[id].startCycle);
+                    if (isHWPrefetch(req)) {
+                        profPrefHitPref.inc();
                     }
-                    else {
-                        profPrefHit.inc();
-                    }
+#ifdef MONITOR_MISS_PCS
+                     //Gather Load PC miss stats
+                     if (MONITORED_PCS) {
+                         trackLoadPc(array[id].pc, late_addr, profLatePc, profLatePcNum);
+                     }
+#endif
                     array[id].prefetch = false;
-
-                    // XXX hack:
-                    if (zinfo->prefetcher) {
-                        MemReq r = *req;
-                        zinfo->prefetcher->prefetch(r);
-                    }
                 }
+                else if(array[id].prefetch && isHWPrefetch(req)) {
+                    profPrefHitPref.inc();
+                }
+            }
+            if (isDemandLoad(req)) {
+                profHitDelayCycles.inc(*availCycle - req->cycle);
             }
             return id;
         }
     }
+    if (req && isHWPrefetch(req)) {
+        profPrefNotInCache.inc();
+    }
+
+#ifdef MONITOR_MISS_PCS
+    //Gather Load PC miss stats
+    if (MONITORED_PCS && isDemandLoad(req)) {
+        trackLoadPc(req->pc, miss_pcs, profMissPc, profMissPcNum);
+    }
+#endif
+
     return -1;
 }
+
+#ifdef MONITOR_MISS_PCS
+void SetAssocArray::trackLoadPc(uint64_t pc, g_unordered_map<uint64_t, uint64_t> &tracked_pcs, VectorCounter &profPc, VectorCounter &profPcNum) {
+    auto miss = tracked_pcs.find(pc);
+    if (miss != tracked_pcs.end()) {
+        miss->second++;
+        if ((miss->second % 100) == 0) {
+            g_multimap<uint64_t, uint64_t> sorted;
+            for (auto entry : tracked_pcs) {
+                sorted.insert(std::pair<uint64_t, uint64_t>(entry.second, entry.first));
+            }
+            int top_misses = 0;
+            for (auto entry = sorted.rbegin(); entry != sorted.rend(); entry++) {
+                if (top_misses == MONITORED_PCS)
+                    break;
+
+                profPc.set(top_misses, entry->second);
+                profPcNum.set(top_misses, entry->first);
+                top_misses++;
+            }
+        }
+    } else {
+        tracked_pcs.insert(std::pair<uint64_t, uint64_t>(pc, 1));
+    }
+}
+#endif
 
 uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) { //TODO: Give out valid bit of wb cand?
     uint32_t set = hf->hash(0, lineAddr) & setMask;
@@ -121,13 +222,29 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
 
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle) {
     rp->replaced(candidate);
+    if (isHWPrefetch(req)) {
+        profPrefPostInsert.inc();
+    }
+
     if(array[candidate].prefetch) {
         profPrefEarlyMiss.inc();
+        if (isHWPrefetch(req)) {
+            profPrefReplacePref.inc();
+        }
+
+#ifdef MONITOR_MISS_PCS
+        //Gather Load PC miss stats
+        if (MONITORED_PCS) {
+            trackLoadPc(array[candidate].pc, early_addr, profEarlyPc, profEarlyPcNum);
+        }
+#endif
+
     }
-    array[candidate].prefetch = req->flags & MemReq::SPECULATIVE;
+    array[candidate].prefetch = isHWPrefetch(req);
     array[candidate].addr = lineAddr;
     array[candidate].availCycle = respCycle;
     array[candidate].startCycle = req->cycle;
+    array[candidate].pc = req->pc;
     rp->update(candidate, req);
 }
 

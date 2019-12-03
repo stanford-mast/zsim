@@ -28,13 +28,16 @@
 
 #include "memory_hierarchy.h"
 #include "stats.h"
-
+#include "g_std/g_unordered_map.h"
+#include "g_std/g_multimap.h"
+//#define MONITOR_MISS_PCS //Uncomment to enable monitoring of cache misses
 
 struct AddrCycle {
     Address addr;   // block address
     uint64_t availCycle; // cycle when the block is available
     uint64_t startCycle; // start cycle of the memory req that inserted this block
     bool prefetch;
+    uint64_t pc;
 };
 
 /* General interface of a cache array. The array is a fixed-size associative container that
@@ -74,12 +77,37 @@ class SetAssocArray : public CacheArray {
         uint32_t assoc;
         uint32_t setMask;
 
+#ifdef MONITOR_MISS_PCS
+        static const uint32_t MONITORED_PCS = 10;
+        g_unordered_map<uint64_t, uint64_t> miss_pcs;
+        g_unordered_map<uint64_t, uint64_t> hit_pcs;
+        g_unordered_map<uint64_t, uint64_t> late_addr;
+        g_unordered_map<uint64_t, uint64_t> early_addr;
+
+        VectorCounter profMissPc;
+        VectorCounter profMissPcNum;
+        VectorCounter profHitPc;
+        VectorCounter profHitPcNum;
+
+        VectorCounter profEarlyPc;
+        VectorCounter profEarlyPcNum;
+        VectorCounter profLatePc;
+        VectorCounter profLatePcNum;
+#endif
+
         Counter profPrefHit;
         Counter profPrefEarlyMiss;
         Counter profPrefLateMiss;
         Counter profPrefLateTotalCycles;
         Counter profPrefSavedCycles;
         Counter profPrefInaccurateOOO;
+        Counter profHitDelayCycles;
+        Counter profPrefHitPref;
+        Counter profPrefAccesses;
+        Counter profPrefInCache;
+        Counter profPrefNotInCache;
+        Counter profPrefPostInsert;
+        Counter profPrefReplacePref;
 
     public:
         SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf);
@@ -87,6 +115,9 @@ class SetAssocArray : public CacheArray {
         int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement, uint64_t* availCycle);
         uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr);
         void postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate, uint64_t respCycle);
+
+        void trackLoadPc(uint64_t pc, g_unordered_map<uint64_t, uint64_t> &tracked_pcs,
+                         VectorCounter &profPc, VectorCounter &profPcNum);
 
         void initStats(AggregateStat* parentStat) override;
 };

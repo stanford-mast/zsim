@@ -98,6 +98,7 @@ class MESIBottomCC : public GlobAlloc {
         // TODO: Measuring writebacks is messy, do if needed
         Counter profGETNextLevelLat, profGETNetLat;
         Counter profSpecGETSHit, profSpecGETSMiss; /*speculative accesses*/
+        Counter profSWSpecGETSHit, profSWSpecGETSMiss; /*speculative accesses*/
 
         bool nonInclusiveHack;
 
@@ -136,6 +137,8 @@ class MESIBottomCC : public GlobAlloc {
             profGETNetLat.init("latGETnet", "GET request latency on network to next level");
             profSpecGETSHit.init("hSpecGETS", "Speculative GETS hits (disjoint from demand)");
             profSpecGETSMiss.init("mSpecGETS", "Speculative GETS misses (disjoint from demand)");
+            profSWSpecGETSHit.init("hSWSpecGETS", "SW prefetch speculative GETS hits (disjoint from demand)");
+            profSWSpecGETSMiss.init("mSWSpecGETS", "SW prefetch speculative GETS misses (disjoint from demand)");
 
             parentStat->append(&profGETSHit);
             parentStat->append(&profGETXHit);
@@ -151,6 +154,8 @@ class MESIBottomCC : public GlobAlloc {
             parentStat->append(&profGETNetLat);
             parentStat->append(&profSpecGETSHit);
             parentStat->append(&profSpecGETSMiss);
+            parentStat->append(&profSWSpecGETSHit);
+            parentStat->append(&profSWSpecGETSMiss);
         }
 
         uint64_t processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId);

@@ -89,14 +89,22 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, int32_t lineId, AccessTyp
             uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
             uint32_t netLat = parentRTTs[parentId];
             respCycle += nextLevelLat + netLat;
-            profSpecGETSMiss.inc();
+            if (flags & MemReq::SW_SPECULATIVE) {
+                profSWSpecGETSMiss.inc();
+            } else {
+                profSpecGETSMiss.inc();
+            }
         } else {
-            profSpecGETSHit.inc();
+            if (flags & MemReq::SW_SPECULATIVE) {
+                profSWSpecGETSHit.inc();
+            } else {
+                profSpecGETSHit.inc();
+            }
         }
         return respCycle;
     }
     MESIState* state = &array[lineId];
-    assert((type == GETS) || !(flags && MemReq::SPECULATIVE));  //A prefetch is only GETS even if triggered by GETX
+    assert((type == GETS) || !(flags & MemReq::SPECULATIVE));  //A prefetch is only GETS even if triggered by GETX
     switch (type) {
         // A PUTS/PUTX does nothing w.r.t. higher coherence levels --- it dies here
         case PUTS: //Clean writeback, nothing to do (except profiling)
@@ -118,7 +126,9 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, int32_t lineId, AccessTyp
                 uint32_t nextLevelLat = parents[parentId]->access(req) - cycle;
                 uint32_t netLat = parentRTTs[parentId];
                 respCycle += nextLevelLat + netLat;
-                if (flags & MemReq::SPECULATIVE) {
+                if (flags & MemReq::SW_SPECULATIVE) {
+                    profSWSpecGETSMiss.inc();
+                } else if (flags & MemReq::SPECULATIVE) {
                     profSpecGETSMiss.inc();
                 } else {
                     profGETNextLevelLat.inc(nextLevelLat);
@@ -126,6 +136,8 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, int32_t lineId, AccessTyp
                     profGETSMiss.inc();
                 }
                 assert(*state == S || *state == E);
+            } else if (flags & MemReq::SW_SPECULATIVE) {
+                profSWSpecGETSHit.inc();
             } else if (flags & MemReq::SPECULATIVE) {
                 profSpecGETSHit.inc();
             } else {
