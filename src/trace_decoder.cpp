@@ -195,6 +195,7 @@ void Decoder::emitLoad(Instr& instr, uint32_t idx, DynUopVec& uops, uint32_t des
     uint32_t op = instr.loadOps[idx];
     uint32_t baseReg = INS_OperandMemoryBaseReg(instr.ins, op);
     uint32_t indexReg = INS_OperandMemoryIndexReg(instr.ins, op);
+    xed_category_enum_t category = (xed_category_enum_t) INS_Category(instr.ins);
 
     if (destReg == 0) destReg = REG_LOAD_TEMP + idx;
 
@@ -204,7 +205,12 @@ void Decoder::emitLoad(Instr& instr, uint32_t idx, DynUopVec& uops, uint32_t des
     uop.rs[0] = baseReg;
     uop.rs[1] = indexReg;
     uop.rd[0] = destReg;
-    uop.type = UopType::LOAD;
+    if (category == XC(PREFETCH)) {
+        uop.type = UopType::SW_DATA_PREFETCH;
+    }
+    else {
+        uop.type = UopType::LOAD;
+    }
     uop.portMask = PORT_2;
     uops.push_back(uop); //FIXME: The interface should support in-place grow...
 }
@@ -284,20 +290,23 @@ void Decoder::emitExecUop(uint32_t rs0, uint32_t rs1, uint32_t rd0, uint32_t rd1
 }
 
 void Decoder::emitBasicMove(Instr& instr, DynUopVec& uops, uint32_t lat, uint8_t ports) {
-    if (instr.numLoads + instr.numInRegs > 1 || instr.numStores + instr.numOutRegs != 1) {
-        reportUnhandledCase(instr, "emitBasicMove");
-    }
     //Note that we can have 0 loads and 0 input registers. In this case, we are loading from an immediate, and we set the input register to 0 so there is no dependence
     uint32_t inReg = (instr.numInRegs == 1)? instr.inRegs[0] : 0;
     if (!instr.numLoads && !instr.numStores) { //reg->reg
+        emitExecUop(inReg, 0, instr.outRegs[0], 0, uops, lat, ports);
+    } else if (instr.numLoads && !instr.numStores && instr.numInRegs && instr.numOutRegs) {
+        emitLoad(instr, 0, uops, instr.outRegs[0]); //AVX Merge: reg+mem->reg
         emitExecUop(inReg, 0, instr.outRegs[0], 0, uops, lat, ports);
     } else if (instr.numLoads && !instr.numStores) { //mem->reg
         emitLoad(instr, 0, uops, instr.outRegs[0]);
     } else if (!instr.numLoads && instr.numStores) { //reg->mem
         emitStore(instr, 0, uops, inReg);
-    } else { //mem->mem
+    } else if (instr.numLoads && instr.numStores) { //mem->mem
         emitLoad(instr, 0, uops);
         emitStore(instr, 0, uops, REG_LOAD_TEMP /*chain with load*/);
+    }
+    else {
+        reportUnhandledCase(instr, "emitBasicMove");
     }
 }
 

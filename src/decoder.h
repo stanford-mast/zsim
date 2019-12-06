@@ -43,7 +43,7 @@
 /* NOTE this uses stronly typed enums, a C++11 feature. This saves a bunch of typecasts while keeping UopType enums 1-byte long.
  * If you use gcc < 4.6 or some other compiler, either go back to casting or lose compactness in the layout.
  */
-enum class UopType : uint8_t {GENERAL, LOAD, LOADI, STORE, STORE_ADDR, FENCE};
+enum class UopType : uint8_t {GENERAL, LOAD, LOADI, STORE, STORE_ADDR, FENCE, SW_DATA_PREFETCH};
 
 struct DynUop {
     uint64_t pc;
