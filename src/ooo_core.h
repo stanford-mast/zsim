@@ -35,11 +35,11 @@
 #include "memory_hierarchy.h"
 #include "ooo_core_recorder.h"
 #include "pad.h"
+#include "ooo_filter_cache.h"
 
 // Uncomment to enable stall stats
 #define OOO_STALL_STATS
 
-class FilterCache;
 
 /* 2-level branch predictor:
  *  - L1: Branch history shift registers (bshr): 2^NB entries, HB bits of history/entry, indexed by XOR'd PC
@@ -369,8 +369,8 @@ struct BblInfo;
 
 class OOOCore : public Core {
     private:
-        FilterCache* l1i;
-        FilterCache* l1d;
+        OOOFilterCache* l1i;
+        OOOFilterCache* l1d;
 
         uint64_t phaseEndCycle; //next stopping point
 
@@ -445,7 +445,7 @@ class OOOCore : public Core {
         OOOCoreRecorder cRec;
 
     public:
-        OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name,
+        OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name,
                 CoreProperties *properties);
 
         void initStats(AggregateStat* parentStat);
@@ -453,6 +453,8 @@ class OOOCore : public Core {
         uint64_t getInstrs() const;
         uint64_t getPhaseCycles() const;
         uint64_t getCycles() const {return cRec.getUnhaltedCycles(curCycle);}
+        uint64_t getCurCycle() const {return curCycle;}
+        OOOCoreRecorder *getCRec() {return &cRec;};
 
         void contextSwitch(int32_t gid);
 

@@ -50,13 +50,11 @@
 #define ISSUE_STAGE 7
 #define DISPATCH_STAGE 13  // RAT + ROB + RS, each is easily 2 cycles
 
-#define L1D_LAT 4  // fixed, and FilterCache does not include L1 delay
-#define L1I_LAT 3  // fixed, and FilterCache does not include L1 delay
 #define FETCH_BYTES_PER_CYCLE 16
 #define ISSUES_PER_CYCLE 4
 #define RF_READS_PER_CYCLE 3
 
-OOOCore::OOOCore(FilterCache* _l1i, FilterCache* _l1d, g_string& _name, CoreProperties *properties) :
+OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, CoreProperties *properties) :
                  Core(_name), l1i(_l1i), l1d(_l1d), cRec(0, _name) {
     decodeCycle = DECODE_STAGE;  // allow subtracting from it
     curCycle = 0;
@@ -278,7 +276,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             case UopType::GENERAL:
                 commitCycle = dispatchCycle + uop->lat;
                 break;
-
+            //SW_DATA_PREFETCH is a subtype of load
+            case UopType::SW_DATA_PREFETCH: {}
             case UopType::LOAD:
                 {
                     // dispatchCycle = MAX(loadQueue.minAllocCycle(), dispatchCycle);
@@ -296,19 +295,24 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     Address addr = loadAddrs[loadIdx++];
                     uint64_t reqSatisfiedCycle = dispatchCycle;
                     if (addr != ((Address)-1L)) {
-                        reqSatisfiedCycle = l1d->load(addr, dispatchCycle, uop->pc) + L1D_LAT;
-                        cRec.record(curCycle, dispatchCycle, reqSatisfiedCycle);
-                        l1d->executePrefetch(curCycle, dispatchCycle, reqSatisfiedCycle, &cRec);
+                        if (uop->type == UopType::SW_DATA_PREFETCH) {
+                            // TODO: Skip cache level based on SW prefetch type
+                            uint64_t lineAddr = addr >> lineBits;
+                            reqSatisfiedCycle = l1d->issuePrefetch(lineAddr, 0, curCycle, dispatchCycle, &cRec, uop->pc, true);
+                        }
+                        else {
+                            reqSatisfiedCycle = l1d->load(addr, curCycle, dispatchCycle, uop->pc, &cRec);
+                        }
                     }
 
                     // Enforce st-ld forwarding
                     uint32_t fwdIdx = (addr>>2) & (FWD_ENTRIES-1);
                     if (fwdArray[fwdIdx].addr == addr) {
                         // info("0x%lx FWD %ld %ld", addr, reqSatisfiedCycle, fwdArray[fwdIdx].storeCycle);
-                        /* Take the MAX (see FilterCache's code) Our fwdArray
+                        /* Take the MAX (see OOOFilterCache's code) Our fwdArray
                          * imposes more stringent timing constraints than the
-                         * l1d, b/c FilterCache does not change the line's
-                         * availCycle on a store. This allows FilterCache to
+                         * l1d, b/c OOOFilterCache does not change the line's
+                         * availCycle on a store. This allows OOOFilterCache to
                          * track per-line, not per-word availCycles.
                          */
                         reqSatisfiedCycle = MAX(reqSatisfiedCycle, fwdArray[fwdIdx].storeCycle);
@@ -326,8 +330,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     // Ignore the reported i-cache latency since the available cycle is tracked and will be reflected
                     // upon fetch from the frontend.
                     Address addr = loadAddrs[loadIdx++];
-                    uint64_t reqSatisfiedCycle = l1i->load(addr, dispatchCycle, uop->pc) + L1I_LAT;
-                    cRec.record(curCycle, dispatchCycle, reqSatisfiedCycle);
+                    l1i->load(addr, curCycle, dispatchCycle, uop->pc, &cRec);
                     commitCycle = dispatchCycle + uop->lat;
                 }
                 break;
@@ -347,9 +350,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     dispatchCycle = MAX(lastStoreAddrCommitCycle+1, dispatchCycle);
 
                     Address addr = storeAddrs[storeIdx++];
-                    uint64_t reqSatisfiedCycle = l1d->store(addr, dispatchCycle, uop->pc) + L1D_LAT;
-                    cRec.record(curCycle, dispatchCycle, reqSatisfiedCycle);
-                    l1d->executePrefetch(curCycle, dispatchCycle, reqSatisfiedCycle, &cRec);
+                    uint64_t reqSatisfiedCycle = l1d->store(addr, curCycle, dispatchCycle, uop->pc, &cRec);
                     // Fill the forwarding table
                     fwdArray[(addr>>2) & (FWD_ENTRIES-1)].set(addr, reqSatisfiedCycle);
 
@@ -451,8 +452,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         Address wrongPathAddr = branchTaken? branchNotTakenNpc : branchTakenNpc;
         uint64_t reqCycle = fetchCycle;
         for (uint32_t i = 0; i < 5*64/lineSize; i++) {
-            uint64_t fetchLat = l1i->load(wrongPathAddr + lineSize*i, curCycle, 0 /*no PC*/) - curCycle;
-            cRec.record(curCycle, curCycle, curCycle + fetchLat);
+            uint64_t fetchLat = l1i->load(wrongPathAddr + lineSize*i, curCycle, curCycle, 0 /*no PC*/, &cRec) - curCycle;
             uint64_t respCycle = reqCycle + fetchLat;
             if (respCycle > lastCommitCycle) {
                 break;
@@ -475,8 +475,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, 0 /*no PC*/) - curCycle;
-        cRec.record(curCycle, curCycle, curCycle + fetchLat);
+        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, 0 /*no PC*/, &cRec) - curCycle;
         fetchCycle += fetchLat;
     }
 

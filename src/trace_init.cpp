@@ -44,7 +44,7 @@
 #include "debug_zsim.h"
 #include "dramsim_mem_ctrl.h"
 #include "event_queue.h"
-#include "filter_cache.h"
+#include "ooo_filter_cache.h"
 #include "galloc.h"
 #include "hash.h"
 #include "ideal_arrays.h"
@@ -64,7 +64,6 @@
 #include "stats.h"
 #include "stats_filter.h"
 #include "str.h"
-#include "table_prefetcher.h"
 #include "timing_cache.h"
 #include "timing_core.h"
 #include "timing_event.h"
@@ -72,6 +71,8 @@
 #include "tracing_cache.h"
 #include "weave_md1_mem.h" //validation, could be taken out...
 #ifdef ZSIM_USE_YT
+#include "table_prefetcher.h"
+#include "tf_prefetcher.h"
 #include "yt_tracer.h"
 #endif  // ZSIM_USE_YT
 #include "zsim.h"
@@ -133,10 +134,11 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             assert(numHashes == 1);
             hf = new IdHashFamily;
         } else if (hashType == "H3") {
-            //STL hash function
-            size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
-            //info("%s -> %lx", prefix.c_str(), seed);
-            hf = new H3HashFamily(numHashes, setBits, 0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
+          auto seed = fnv_1a_hash_64(prefix, 0xB4AC5B, true);
+          // info("%s -> %lx", prefix.c_str(), seed);
+          hf = new H3HashFamily(
+              numHashes, setBits,
+              0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
         } else if (hashType == "SHA1") {
             hf = new SHA1HashFamily(numHashes);
         } else {
@@ -290,7 +292,22 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         //Filter cache optimization
         if (type != "Simple") panic("Terminal cache %s can only have type == Simple", name.c_str());
         if (arrayType != "SetAssoc" || hashType != "None" || replType != "LRU") panic("Invalid FilterCache config %s", name.c_str());
-        cache = new FilterCache(numSets, numLines, cc, array, rp, accLat, invLat, name);
+
+        //Access based Next Line Prefetch
+        uint32_t numLinesNLP = config.get<uint32_t>(prefix + "numLinesNLP", 0);
+
+        //Zero latency cache configuration
+        bool zeroLatencyCache = config.get<bool>(prefix + "zeroLatencyCache", false);
+
+        //Dataflow prefetcher configuration
+        uint32_t pref_deg = config.get<uint32_t>(prefix +"pref_degree", 0);
+        bool pref_simple = config.get<bool>(prefix + "pref_simple", true);
+        bool pref_complex = config.get<bool>(prefix + "pref_complex", false);
+        bool limit_pref = config.get<bool>(prefix + "limit_prefetching", false);
+        bool var_degree = config.get<bool>(prefix + "variable_degree", false);
+        g_string pref_kernels_file = config.get<const char*>(prefix + "pref_kernels", "");
+        cache = new OOOFilterCache(numSets, numLines, cc, array, rp, latency, invLat, name, numLinesNLP, zeroLatencyCache, pref_deg,
+                                   pref_simple, pref_complex, limit_pref, var_degree, pref_kernels_file);
     }
 
 #if 0
@@ -390,8 +407,9 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
 
     string prefetch_type = config.get<const char*>(prefix + "prefetcherType", "");
     if (!prefetch_type.empty()) { //build a prefetcher group
-        if (prefetch_type.compare("Stride") == 0 ||
-            prefetch_type.compare("GHB") == 0) {
+        if (prefetch_type == "Stride" ||
+            prefetch_type == "GHB" ||
+            prefetch_type == "Dataflow") {
             uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
             uint32_t streams = config.get<uint32_t>(prefix + "streams", 16);
             uint32_t log_distance = config.get<uint32_t>(prefix + "log_distance", 6);
@@ -408,7 +426,7 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                 stringstream ss;
                 ss << name << "-" << i;
                 g_string pfName(ss.str().c_str());
-                if (prefetch_type.compare("GHB") == 0) {
+                if (prefetch_type == "GHB") {
                     uint32_t ghb_size;
                     ghb_size = config.get<uint32_t>(prefix + "ghb_size", 1024);
                     uint32_t index_size =
@@ -427,6 +445,26 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                                                  delta_correlat, monitor_GETS,
                                                  monitor_GETX);
                 }
+                else if (prefetch_type == "Dataflow") {
+                    g_string target_cache =
+                        config.get<const char*>(prefix + "target", "");
+                    bool monitor_GETS =
+                        config.get<bool>(prefix + "monitor_GETS", true);
+                    bool monitor_GETX =
+                        config.get<bool>(prefix + "monitor_GETX", true);
+                    bool pref_simple = config.get<bool>(prefix + "pref_simple", true);
+                    bool pref_complex = config.get<bool>(prefix + "pref_complex", false);
+                    bool limit_pref = config.get<bool>(prefix + "limit_prefetching", false);
+                    bool var_degree = config.get<bool>(prefix + "variable_degree", false);
+                    g_string pref_kernels =
+                        config.get<const char*>(prefix + "pref_kernels", "");
+                    cg[i][0] = new DataflowPrefetcher(pfName,
+                                                 degree, target_cache,
+                                                 monitor_GETS, monitor_GETX,
+                                                 pref_simple, pref_complex,
+                                                 limit_pref, var_degree, NULL,
+                                                 pref_kernels);
+                }
                 else {
                     if(!(degree > 0 && degree < 5)) {
                         panic("Prefetch degree must be in between 1 and 4");
@@ -436,7 +474,8 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                 }
             }
             return cgp;
-        } else if (prefetch_type.compare("Table") == 0) {
+#ifdef ZSIM_USE_YT
+        } else if (prefetch_type == "Table") {
             g_string table_file = config.get<const char*>(prefix + "table", "");
             double conf_thresh = config.get<double>(prefix + "confidence", 0.0);
             double prob_thresh = config.get<double>(prefix + "probability", 0.0);
@@ -467,7 +506,44 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                                                        table_file, conf_thresh, prob_thresh, degree, stride_detection));
             }
             return cgp;
-        } else if (prefetch_type.compare("Nextline") == 0) {
+        } else if (prefetch_type == "TensorFlow") {
+            g_string pc_vocab_path = config.get<const char*>(prefix + "pcVocabPath", "");
+            g_string delta_vocab_path = config.get<const char*>(prefix + "deltaVocabPath", "");
+            g_string model_path = config.get<const char*>(prefix + "modelPath", "");
+            double conf_thresh = config.get<double>(prefix + "confidence", -0.69); //high confidence: >50% weight for one delta, will emit at most one prefetch
+            bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
+            bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 1);
+            uint32_t depth = config.get<uint32_t>(prefix + "depth", 1);
+            g_string target_cache = config.get<const char*>(prefix + "target", "");
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            if (pc_vocab_path.empty()) {
+                panic("TensorFlow prefetcher requires a PC vocabulary input file");
+            }
+            if (delta_vocab_path.empty()) {
+                panic("TensorFlow prefetcher requires a delta vocabulary input file");
+            }
+            if (model_path.empty()) {
+                panic("TensorFlow prefetcher requires a model input file");
+            }
+            if (conf_thresh > 0.0) {
+                panic("Confidence threshold must be smaller 0.0");
+            }
+            if (target_cache.empty()) {
+                panic("Unspecified target cache for prefetcher '%s'", name.c_str());
+            }
+            cg.resize(prefetchers);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << '-' << i;
+                g_string full_name(ss.str().c_str());
+                cg[i].emplace_back(new TFPrefetcher(full_name, target_cache, monitor_loads, monitor_stores,
+                                                    model_path, pc_vocab_path, delta_vocab_path, degree,
+                                                    depth, conf_thresh));
+            }
+            return cgp;
+#endif
+        } else if (prefetch_type == "Nextline") {
             bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
             bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
             uint32_t degree = config.get<uint32_t>(prefix + "degree", 0);
@@ -497,7 +573,7 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
     string tracer_type = config.get<const char*>(prefix + "tracerType", "");
     if (!tracer_type.empty()) {
         assert(prefetch_type.empty());
-        if(tracer_type.compare("YT") == 0) {
+        if(tracer_type == "YT") {
             string traceFile = config.get<const char*>(prefix + "traceFile","");
             bool demand = config.get<bool>(prefix + "demand", true);
             bool speculative = config.get<bool>(prefix + "speculative", true);
@@ -787,7 +863,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[icache] >= igroup.size()) {
                         panic("%s: icache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), icache.c_str(), igroup.size());
                     }
-                    FilterCache* ic = dynamic_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
+                    OOOFilterCache* ic = dynamic_cast<OOOFilterCache*>(igroup[assignedCaches[icache]][0]);
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
@@ -797,7 +873,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[dcache] >= dgroup.size()) {
                         panic("%s: dcache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), dcache.c_str(), dgroup.size());
                     }
-                    FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
+                    OOOFilterCache* dc = dynamic_cast<OOOFilterCache*>(dgroup[assignedCaches[dcache]][0]);
                     assert(dc);
                     dc->setSourceId(coreIdx);
                     dc->setType(FilterCache::Type::D);

@@ -43,7 +43,7 @@
  */
 
 class FilterCache : public Cache {
-    private:
+    protected:
         struct FilterEntry {
             volatile Address rdAddr;
             volatile Address wrAddr;
@@ -65,8 +65,12 @@ class FilterCache : public Cache {
         struct PrefetchInfo {
             Address addr;
             uint32_t skip;
+            uint64_t pc;
+            bool isSW;
+            bool serialize; //Serializes this prefetch after the previous one (dispatchCycle)
 
-            PrefetchInfo(Address _addr, uint32_t _skip) : addr(_addr), skip(_skip) {};
+            PrefetchInfo(Address _addr, uint32_t _skip, uint64_t _pc, bool _isSW, bool _serialize)
+                : addr(_addr), skip(_skip), pc(_pc), isSW(_isSW), serialize(_serialize) {};
         };
         g_vector<PrefetchInfo> prefetchQueue;
 
@@ -128,6 +132,7 @@ class FilterCache : public Cache {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
+
             if (vLineAddr == filterArray[idx].rdAddr) {
                 fGETSHit++;
                 return MAX(curCycle, availCycle);
@@ -168,6 +173,7 @@ class FilterCache : public Cache {
             //For LSU simulation purposes, loads bypass stores even to the same line if there is no conflict,
             //(e.g., st to x, ld from x+8) and we implement store-load forwarding at the core.
             //So if this is a load, it always sets availCycle; if it is a store hit, it doesn't
+
             if (oldAddr != vLineAddr) filterArray[idx].availCycle = respCycle;
 
             futex_unlock(&filterLock);
@@ -187,29 +193,39 @@ class FilterCache : public Cache {
             return respCycle;
         }
 
-        void schedulePrefetch(Address lineAddr, uint32_t skip) {
+        void schedulePrefetch(Address lineAddr, uint32_t skip, uint64_t pc, bool isSW, bool serialize) {
             // A prefetch from any level of the memory hierarchy is inserted in the filter cache queue of the core
             // whose demand access triggered the prefetch. By originating all prefetch requests from the filter caches,
             // we avoid races and complexities that come with injecting new accesses into an in-progress request.
             // The 'skip' parameter is decremented at each cache level and the prefetch block is allocated starting at
             // the cache for which the value is zero.
-            prefetchQueue.emplace_back(lineAddr, skip);
+            prefetchQueue.emplace_back(lineAddr, skip, pc, isSW, serialize);
         }
 
-  void executePrefetch(uint64_t curCycle, uint64_t dispatchCycle, uint64_t reqSatisfiedCycle, OOOCoreRecorder *cRec) {
-    futex_lock(&filterLock);
+        void schedulePrefetch(Address lineAddr, uint32_t skip) {
+            prefetchQueue.emplace_back(lineAddr, skip, 0, false, false);
+        }
+
+        void executePrefetch(uint64_t curCycle, uint64_t dispatchCycle, uint64_t reqSatisfiedCycle, OOOCoreRecorder *cRec) {
+            futex_lock(&filterLock);
             //Send out any prefetch requests that were created during the prior access
             if (unlikely(!prefetchQueue.empty())) {
+                uint64_t respCycle = dispatchCycle;
                 for (auto& prefetch : prefetchQueue) {
-                  MESIState dummyState = MESIState::I;
-                  MemReq req = {0 /*No PC*/, prefetch.addr, GETS, 0, &dummyState, dispatchCycle, &filterLock, dummyState, srcId, MemReq::PREFETCH | MemReq::SPECULATIVE, prefetch.skip};
-                  uint64_t respCycle = access(req);
-                  cRec->record(curCycle, dispatchCycle, respCycle);
+                    MESIState dummyState = MESIState::I;
+                    if (prefetch.serialize) {
+                        dispatchCycle = respCycle;
+                    }
+                    MemReq req = {prefetch.pc, prefetch.addr, GETS, 0, &dummyState, dispatchCycle, &filterLock, dummyState,
+                                  srcId, MemReq::PREFETCH | MemReq::SPECULATIVE | (prefetch.isSW ? MemReq::SW_SPECULATIVE : 0U),
+                                  prefetch.skip};
+                    respCycle = access(req);
+                    cRec->record(curCycle, dispatchCycle, respCycle);
                 }
                 prefetchQueue.clear();
             }
             futex_unlock(&filterLock);
-  }
+        }
 
         void contextSwitch() {
             futex_lock(&filterLock);
