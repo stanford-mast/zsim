@@ -11,9 +11,9 @@ class TraceReaderMemtrace : public TraceReader {
   public:
     const InstInfo *getNextInstruction() override;
     TraceReaderMemtrace(const std::string &_trace, const std::string &_binary,
-                        uint64_t _offset);
+                        uint64_t _offset, uint32_t _bufsize);
     TraceReaderMemtrace(const std::string &_trace,
-                        const std::string &_binary_group_path);
+                        const std::string &_binary_group_path, uint32_t _bufsize);
     ~TraceReaderMemtrace();
 
   private:

@@ -42,6 +42,15 @@
 #include "event_queue.h"
 #include "init.h"
 
+#ifdef ZSIM_USE_YT
+#include "trace_reader_yt.h"
+#include "yt_tracer.h"
+/* Both yt_tracer and drmemtrace define int64. Include trace_reader_memtrace.h
+ * after yt_tracer.h and the do not define statement
+ */
+#define DR_DO_NOT_DEFINE_int64
+#define DR_DO_NOT_DEFINE_uint64
+#endif  // ZSIM_USE_YT
 #include "trace_reader_memtrace.h"
 
 const uint32_t END_TRACE_SIM = ~0x0;
@@ -218,13 +227,15 @@ void *simtrace(void *arg) {
     int tid = ti->tid;
     std::unordered_map<uint64_t, bbl_cache_entry> bbl_cache;
     TraceReader *reader;
+    //TODO heinerl: Only enable buffer for dataflow prefetcher
+    uint32_t bufsize = 10000;
 
     if(ti->type.compare("MEMTRACE") == 0) {
-        reader = new TraceReaderMemtrace(ti->tracefile, ti->binaries);
+        reader = new TraceReaderMemtrace(ti->tracefile, ti->binaries, bufsize);
     }
 #ifdef ZSIM_USE_YT
     else if(ti->type.compare("YT") == 0) {
-        reader = new TraceReaderYT(ti->tracefile, ti->binaries);
+        reader = new TraceReaderYT(ti->tracefile, ti->binaries, bufsize);
     }
 #endif  // ZSIM_USE_YT
     else {

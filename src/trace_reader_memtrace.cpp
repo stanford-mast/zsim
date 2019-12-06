@@ -5,9 +5,11 @@
 
 // Trace + single binary
 TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
-                   const std::string &_binary, uint64_t _offset)
-    : TraceReader(_trace, _binary, _offset),  mt_iter_(nullptr), mt_end_(nullptr),
-  mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
+                                         const std::string &_binary,
+                                         uint64_t _offset,
+                                         uint32_t _bufsize)
+    : TraceReader(_trace, _binary, _offset, _bufsize),  mt_iter_(nullptr),
+      mt_end_(nullptr), mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
   mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
   init();
   traceFileIs(_trace);
@@ -15,9 +17,10 @@ TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
 
 // Trace + multiple binaries
 TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
-                   const std::string &_binary_group_path)
-    : TraceReader(_trace, _binary_group_path), mt_iter_(nullptr), mt_end_(nullptr),
-  mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
+                                         const std::string &_binary_group_path,
+                                         uint32_t _bufsize)
+    : TraceReader(_trace, _binary_group_path, _bufsize), mt_iter_(nullptr),
+      mt_end_(nullptr), mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
   mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
   init();
   binaryGroupPathIs(_binary_group_path);
