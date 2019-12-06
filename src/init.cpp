@@ -135,7 +135,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             hf = new IdHashFamily;
         } else if (hashType == "H3") {
             //STL hash function
-            size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
+            size_t seed = fnv_1a_hash_64(prefix, 0xB4AC5B, true);
             //info("%s -> %lx", prefix.c_str(), seed);
             hf = new H3HashFamily(numHashes, setBits, 0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
         } else if (hashType == "SHA1") {
@@ -769,7 +769,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[icache] >= igroup.size()) {
                         panic("%s: icache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), icache.c_str(), igroup.size());
                     }
-                    FilterCache* ic = dynamic_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
+                    OOOFilterCache* ic = dynamic_cast<OOOFilterCache*>(igroup[assignedCaches[icache]][0]);
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
@@ -779,7 +779,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[dcache] >= dgroup.size()) {
                         panic("%s: dcache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), dcache.c_str(), dgroup.size());
                     }
-                    FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
+                    OOOFilterCache* dc = dynamic_cast<OOOFilterCache*>(dgroup[assignedCaches[dcache]][0]);
                     assert(dc);
                     dc->setSourceId(coreIdx);
                     dc->setType(FilterCache::Type::D);
