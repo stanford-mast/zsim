@@ -28,6 +28,9 @@
 #define HASH_H_
 
 #include <stdint.h>
+
+#include <string>
+
 #include "galloc.h"
 
 class HashFamily : public GlobAlloc {
@@ -82,4 +85,7 @@ public:
     }
 };
 
+// 64-bit FNV hashing routine
+uint64_t fnv_1a_hash_64(const std::string& data, const uint64_t offset_basis,
+                        bool trailing_null);
 #endif  // HASH_H_

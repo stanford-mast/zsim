@@ -174,4 +174,31 @@ uint64_t SHA1HashFamily::hash(uint32_t id, uint64_t val) {
     return 0;
 }
 
+// 64-bit FNV hashing routine
+uint64_t fnv_1a_hash_64(const std::string& data, const uint64_t offset_basis,
+                        bool trailing_null) {
+  // This routine is documented at
+  // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV-1a_hash
+
+  // The 64-bit prime value was taken from
+  // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function#FNV_hash_parameters
+  const uint64_t fnv_prime = 1099511628211;
+
+  uint64_t hash = offset_basis;
+  for (const auto& byte : data) {
+    hash ^= static_cast<uint64_t>(byte);
+    hash *= fnv_prime;
+  }
+
+  // The original zsim code hashed the trailing null of the string for some
+  // reason and I can't see if the resulting value gets persisted to disk or
+  // not.  Since I implemented this in terms of a C++ string instead of a
+  // zstring, we offer this option.
+  if (trailing_null) {
+    hash *= fnv_prime;
+  }
+
+  return hash;
+}
+
 #endif  // _WITH_POLARSSL_
