@@ -26,27 +26,30 @@ TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
 
 TraceReaderMemtrace::~TraceReaderMemtrace() {
   if (mt_warn_target_ > 0) {
-    warn("Set %lu conditional branches to 'not-taken' due to pid/tid gaps\n",
-         mt_warn_target_);
+      warn("Set %lu conditional branches to 'not-taken' due to pid/tid gaps\n",
+	   mt_warn_target_);
   }
 }
 
 void TraceReaderMemtrace::init() {
-  mt_info_a_.custom_op = CustomOp::NONE;
-  mt_info_b_.custom_op = CustomOp::NONE;
-  mt_info_a_.valid = true;
-  mt_info_b_.valid = true;
+    mt_info_a_.custom_op = CustomOp::NONE;
+    mt_info_b_.custom_op = CustomOp::NONE;
+    mt_info_a_.valid = true;
+    mt_info_b_.valid = true;
 }
 
+//TODO: Detect memtrace/module.log type dynamically
+#ifdef ZSIM_USE_YT
 /* Below is required to parse Google Memtraces that contain an extra column */
 const char *TraceReaderMemtrace::parse_buildid_string(const char *src, OUT void **data)
 {
-  // We just skip the string.  We don't store it as we're not using it here.
-  const char* comma = strchr(src, ',');
-  if (comma == nullptr)
-    return nullptr;
-  return comma + 1;
+    // We just skip the string.  We don't store it as we're not using it here.
+    const char* comma = strchr(src, ',');
+    if (comma == nullptr)
+	return nullptr;
+    return comma + 1;
 }
+#endif
 
 void TraceReaderMemtrace::binaryGroupPathIs(const std::string &_path) {
     clearBinaries();
@@ -71,8 +74,13 @@ void TraceReaderMemtrace::binaryGroupPathIs(const std::string &_path) {
                   error.c_str());
             return;
         }
-        module_mapper_ = module_mapper_t::create(directory_.modfile_bytes, parse_buildid_string, nullptr,
-                                                nullptr, nullptr, knob_verbose_);
+        module_mapper_ = module_mapper_t::create(directory_.modfile_bytes,
+#ifdef ZSIM_USE_YT
+						 parse_buildid_string,
+#else
+						 nullptr,
+#endif
+						 nullptr, nullptr, nullptr, knob_verbose_);
         module_mapper_->get_loaded_modules();
         error = module_mapper_->get_last_error();
         if (!error.empty()) {
