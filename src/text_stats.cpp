@@ -38,6 +38,16 @@ class TextBackendImpl : public GlobAlloc {
         AggregateStat* rootStat;
 
         void dumpStat(Stat* s, uint32_t level, std::ofstream* out) {
+            if (std::string(s->name()) == "highPrefLatePc" ||
+                std::string(s->name()) == "highPrefEarlyPc" ||
+                std::string(s->name()) == "highMissPc" ||
+
+                std::string(s->name()) == "highPrefHitPc") {
+                *out << std::hex;
+            }
+            else {
+                *out << std::dec;
+            }
             for (uint32_t i = 0; i < level; i++) *out << " ";
             *out << s->name() << ": ";
             if (AggregateStat* as = dynamic_cast<AggregateStat*>(s)) {

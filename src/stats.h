@@ -295,6 +295,11 @@ class VectorCounter : public VectorStat {
         inline uint32_t size() const {
             return _counters.size();
         }
+
+        inline void set(uint32_t idx, uint64_t data) {
+            _counters[idx] = data;
+        }
+
 };
 
 /*
