@@ -88,16 +88,12 @@ class TraceReader {
   // The default-constructed object will not return valid instructions
   TraceReader();
   // A trace and single-binary object
-  TraceReader(const std::string &_trace,
-           const std::string &_binary, uint64_t _offset);
+  TraceReader(const std::string &_trace, const std::string &_binary,
+              uint64_t _offset, uint32_t _buf_size = 0);
   // A trace and multi-binary object which reads 'binary-info.txt' from the
   // input path. This file contains one '<binary> <offset>' pair per line.
-  TraceReader(const std::string &_trace,
-           const std::string &_binary_group_path);
-  TraceReader(const std::string &_trace, const std::string &_binary,
-              uint64_t _offset, uint32_t _buf_size);
   TraceReader(const std::string &_trace, const std::string &_binary_group_path,
-              uint32_t _buf_size);
+              uint32_t _buf_size = 0);
   ~TraceReader();
   // A constructor that fails will cause operator! to return true
   bool operator!();
@@ -113,7 +109,6 @@ class TraceReader {
   virtual bool initTrace() = 0;
   virtual bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size) = 0;
 
-  void init();
   void init_buffer();
   void binaryFileIs(const std::string &_binary, uint64_t _offset);
 
@@ -135,6 +130,7 @@ class TraceReader {
   uint32_t buf_size_;
   std::deque <InstInfo> ins_buffer;
 
+  void init();
   bool initBinary(const std::string &_name, uint64_t _offset);
   void clearBinaries();
   void fillCache(uint64_t _vAddr, uint8_t _reported_size);

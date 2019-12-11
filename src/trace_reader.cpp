@@ -31,33 +31,19 @@ TraceReader::TraceReader()
 }
 
 // Trace + single binary
-TraceReader::TraceReader(const std::string &_trace,
-                   const std::string &_binary, uint64_t _offset)
+TraceReader::TraceReader(const std::string &_trace, const std::string &_binary,
+			 uint64_t _offset, uint32_t _buf_size)
   : trace_ready_(false), binary_ready_(true),
-    warn_not_found_(1), skipped_(0), buf_size_(0) {
-  init();
-  binaryFileIs(_binary, _offset);
+    warn_not_found_(1), skipped_(0), buf_size_(_buf_size) {
+    binaryFileIs(_binary, _offset);
 }
 
 // Trace + multiple binaries
 TraceReader::TraceReader(const std::string &_trace,
-                         const std::string &_binary_group_path)
-  : trace_ready_(false), binary_ready_(true),
-    warn_not_found_(1), skipped_(0), buf_size_(0) {
-  init();
-}
-
-TraceReader::TraceReader(const std::string &_trace, const std::string &_binary,
-                         uint64_t _offset, uint32_t _buf_size)
-    : TraceReader(_trace, _binary, _offset) {
-  buf_size_ = _buf_size;
-}
-
-TraceReader::TraceReader(const std::string &_trace,
                          const std::string &_binary_group_path,
                          uint32_t _buf_size)
-    : TraceReader(_trace, _binary_group_path) {
-  buf_size_ = _buf_size;
+  : trace_ready_(false), binary_ready_(true),
+    warn_not_found_(1), skipped_(0), buf_size_(_buf_size) {
 }
 
 TraceReader::~TraceReader() {
