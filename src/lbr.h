@@ -5,18 +5,16 @@
 
 using namespace std;
 
-#include "memory_hierarchy.h"
-
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
 
 class LBREntry
 {
 private:
-    Address _bbl_address;
+    uint64_t _bbl_address;
     uint64_t _cycles; /*elapsed core clocks since last update to the LBR stack*/
 public:
-    LBREntry(Address bbl_address, uint64_t cycles)
+    LBREntry(uint64_t bbl_address, uint64_t cycles)
     {
         _bbl_address = bbl_address;
         _cycles = cycles;
@@ -40,7 +38,7 @@ public:
         last_cycle = 0;
         _queue.clear();
     }
-    void push(Address bbl_address=0, uint64_t cur_cycle=0)
+    void push(uint64_t bbl_address=0, uint64_t cur_cycle=0)
     {
         uint64_t result = cur_cycle;
         if(cur_cycle!=0)
