@@ -110,7 +110,7 @@ struct MemReq {
     //Use with the 'SPECULATIVE' flag above to separate from demand accesses and to prevent additional reactive prefetches
     uint32_t prefetch;
     
-    LBR_Stack * core_lbr = NULL;
+    LBR_Stack * core_lbr;
 
     inline void set(Flag f) {flags |= f;}
     inline bool is (Flag f) const {return flags & f;}
