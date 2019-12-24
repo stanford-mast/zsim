@@ -1,9 +1,10 @@
 #ifndef LBR_H_
 #define LBR_H_
 
-#include <bits/stdc++.h>
-
-using namespace std;
+#include <stdint.h>
+#include <deque>
+#include <sstream>
+#include <string>
 
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
@@ -19,9 +20,9 @@ public:
         _bbl_address = bbl_address;
         _cycles = cycles;
     }
-    string get_string()
+    std::string get_string()
     {
-        ostringstream os;
+        std::ostringstream os;
         os<<_bbl_address<<";"<<_cycles;
         return os.str();
     }
@@ -30,7 +31,7 @@ public:
 class LBR_Stack
 {
 private:
-    deque<LBREntry> _queue;
+    std::deque<LBREntry> _queue;
     uint64_t last_cycle;
 public:
     LBR_Stack()
@@ -54,9 +55,9 @@ public:
         }
         _queue.push_back(new_entry);
     }
-    string get_string()
+    std::string get_string()
     {
-        ostringstream os;
+        std::ostringstream os;
         for(int i=_queue.size()-1; i>-1; i--)
         {
             os<<_queue[i].get_string()<<",";
