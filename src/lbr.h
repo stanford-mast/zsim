@@ -13,22 +13,18 @@ using namespace std;
 class LBREntry
 {
 private:
-    Address _from_address;
-    Address _to_address;
-    bool _prediction_result; /*false->mispredicted, true->predicted*/
+    Address _bbl_address;
     uint64_t _cycles; /*elapsed core clocks since last update to the LBR stack*/
 public:
-    LBREntry(Address from, Address to, bool result, uint64_t cycles)
+    LBREntry(Address bbl_address, uint64_t cycles)
     {
-        _from_address = from;
-        _to_address = to;
-        _prediction_result = result;
+        _bbl_address = bbl_address;
         _cycles = cycles;
     }
     string get_string()
     {
         ostringstream os;
-        os<<_from_address<<";"<<_to_address<<";"<<_prediction_result<<";"<<_cycles;
+        os<<_bbl_address<<";"<<_cycles;
         return os.str();
     }
 };
@@ -37,13 +33,23 @@ class LBR_Stack
 {
 private:
     deque<LBREntry> _queue;
+    uint64_t last_cycle;
 public:
     LBR_Stack()
     {
+        last_cycle = 0;
+        _queue.clear();
     }
-    void push(Address from=0, Address to=0, bool result=true, uint64_t cycles=0)
+    void push(Address bbl_address=0, uint64_t cur_cycle=0)
     {
-        LBREntry new_entry(from, to, result, cycles);
+        uint64_t result = cur_cycle;
+        if(cur_cycle!=0)
+        {
+            assert(cur_cycle>=last_cycle);
+            result=cur_cycle-last_cycle;
+            last_cycle = cur_cycle;
+        }
+        LBREntry new_entry(bbl_address, result);
         if(likely(_queue.size()==LBR_CAPACITY))
         {
             _queue.pop_front();
