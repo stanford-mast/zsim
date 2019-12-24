@@ -33,6 +33,7 @@
 #include "g_std/g_vector.h"
 #include "galloc.h"
 #include "locks.h"
+#include "lbr.h"
 
 /** TYPES **/
 
@@ -108,6 +109,8 @@ struct MemReq {
     //At that point PREFETCH is effectively set for the target cache insertion.
     //Use with the 'SPECULATIVE' flag above to separate from demand accesses and to prevent additional reactive prefetches
     uint32_t prefetch;
+    
+    LBR_Stack * core_lbr = NULL;
 
     inline void set(Flag f) {flags |= f;}
     inline bool is (Flag f) const {return flags & f;}
