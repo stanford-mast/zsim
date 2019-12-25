@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <fstream>
+#include <iostream>
 
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
@@ -72,7 +73,7 @@ public:
     }
     void log_event(uint64_t pc)
     {
-        if(log_file.is_open())log_file<<pc<<","<<get_string()<<"\n";
+        if(log_file.is_open())log_file<<pc<<","<<get_string()<<std::endl;
     }
     ~LBR_Stack()
     {
