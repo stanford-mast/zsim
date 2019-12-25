@@ -100,7 +100,7 @@ public:
                          OOOCoreRecorder *cRec, LBR_Stack *lbr=nullptr) {
         Address vLineAddr = vAddr >> lineBits;
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc) + accLat;
+        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc,lbr) + accLat;
         cRec->record(curCycle, dispatchCycle, respCycle);
 
         //Support legacy prefetching flow for backwards compatibility
