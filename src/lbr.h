@@ -71,9 +71,9 @@ public:
         }
         return os.str();
     }
-    void log_event(uint64_t pc)
+    void log_event(uint64_t pc,uint64_t miss_cl_address)
     {
-        if(log_file.is_open())log_file<<pc<<","<<get_string()<<std::endl;
+        if(log_file.is_open())log_file<<miss_cl_address<<","<<pc<<","<<get_string()<<std::endl;
     }
     ~LBR_Stack()
     {
