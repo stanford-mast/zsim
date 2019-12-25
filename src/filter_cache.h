@@ -31,6 +31,7 @@
 #include "galloc.h"
 #include "zsim.h"
 #include "ooo_core_recorder.h"
+#include "lbr.h"
 
 /* Extends Cache with an L0 direct-mapped cache, optimized to hell for hits
  *
@@ -128,7 +129,7 @@ class FilterCache : public Cache {
             parentStat->append(cacheStat);
         }
 
-        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc) {
+        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr) {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
