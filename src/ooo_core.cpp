@@ -76,6 +76,8 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
     for (uint32_t i = 0; i < FWD_ENTRIES; i++) fwdArray[i].set((Address)(-1L), 0);
 
     branchPred = new BranchPredictorPAg(properties->bp_nb, properties->bp_hb, properties->bp_lb);
+    
+    lbr.set_log_file(_name.c_str());
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {

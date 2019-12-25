@@ -32,6 +32,8 @@
 #include "g_std/g_multimap.h"
 //#define MONITOR_MISS_PCS //Uncomment to enable monitoring of cache misses
 
+#define LOG_L1I_MISS_LBR
+
 struct AddrCycle {
     Address addr;   // block address
     uint64_t availCycle; // cycle when the block is available

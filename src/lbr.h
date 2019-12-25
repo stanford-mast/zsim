@@ -5,6 +5,7 @@
 #include <deque>
 #include <sstream>
 #include <string>
+#include <fstream>
 
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
@@ -33,11 +34,16 @@ class LBR_Stack
 private:
     std::deque<LBREntry> _queue;
     uint64_t last_cycle;
+    std::ofstream log_file;
 public:
     LBR_Stack()
     {
         last_cycle = 0;
         _queue.clear();
+    }
+    void set_log_file(const char *path_name)
+    {
+        log_file.open(path_name);
     }
     void push(uint64_t bbl_address=0, uint64_t cur_cycle=0)
     {
@@ -63,6 +69,14 @@ public:
             os<<_queue[i].get_string()<<",";
         }
         return os.str();
+    }
+    void log_event(uint64_t pc)
+    {
+        if(log_file.is_open()))log_file<<pc<<","<<get_string()<<"\n";
+    }
+    ~LBR_Stack()
+    {
+        if(log_file.is_open()))log_file.close();
     }
 };
 
