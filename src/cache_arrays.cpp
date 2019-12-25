@@ -172,6 +172,11 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
     if (req && isHWPrefetch(req)) {
         profPrefNotInCache.inc();
     }
+    
+    if(req->core_lbr)
+    {
+        info("LBR: %s\n",req->core_lbr->get_string().c_str());
+    }
 
 #ifdef MONITOR_MISS_PCS
     //Gather Load PC miss stats

@@ -138,7 +138,7 @@ class FilterCache : public Cache {
                 fGETSHit++;
                 return MAX(curCycle, availCycle);
             } else {
-                return replace(vLineAddr, idx, true, curCycle, pc);
+                return replace(vLineAddr, idx, true, curCycle, pc, lbr);
             }
         }
 
@@ -156,12 +156,20 @@ class FilterCache : public Cache {
             }
         }
 
-        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc) {
+        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr) {
           //assert(prefetchQueue.empty());
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;
             futex_lock(&filterLock);
             MemReq req = {pc, pLineAddr, isLoad? GETS : GETX, 0, &dummyState, curCycle, &filterLock, dummyState, srcId, reqFlags};
+            if(lbr)
+            {
+                req.core_lbr = lbr;
+            }
+            else
+            {
+                req.core_lbr = nullptr;
+            }
             uint64_t respCycle  = access(req);
 
             //Due to the way we do the locking, at this point the old address might be invalidated, but we have the new address guaranteed until we release the lock
