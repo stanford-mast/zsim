@@ -176,7 +176,7 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
 #ifdef LOG_L1I_MISS_LBR
     if(req->core_lbr)
     {
-        req->core_lbr->log_event(req->pc);
+        req->core_lbr->log_event(req->pc,lineAddr);
     }
 #endif
 
