@@ -1154,6 +1154,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                 uint64_t bbl_addr;
                 uint64_t num_prefetch;
                 uint64_t target;
+                zinfo->iprefetch_bbl_to_cl_address_map = std::unordered_map<uint64_t,std::vector<uint64_t>();
                 while(fscanf(tmp_file, "%" SCNu64 " %" SCNu64 " ", &bbl_addr, &num_prefetch) != EOF)
                 {
                     if(zinfo->iprefetch_bbl_to_cl_address_map.find(bbl_addr)!=zinfo->iprefetch_bbl_to_cl_address_map.end())
