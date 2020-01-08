@@ -77,6 +77,8 @@
 #endif  // ZSIM_USE_YT
 #include "zsim.h"
 
+#include <stdio.h>
+
 using namespace std;
 
 extern void EndOfPhaseActions(); //in zsim.cpp
@@ -1138,6 +1140,43 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->globalPauseFlag = config.get<bool>("sim.startInGlobalPause", false);
 
     zinfo->eventQueue = new EventQueue(); //must be instantiated before the memory hierarchy
+    
+    zinfo->enable_iprefetch = config.get<bool>("sim.enable_iprefetch", false);
+    if(zinfo->enable_iprefetch)
+    {
+        const char* iprefetch_info_file_name = realpath(conf.get<const char*>("sim.iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
+        if(iprefetch_info_file_name!=nullptr)
+        {
+            FILE *tmp_file = fopen(iprefetch_info_file_name, "r");
+            if(tmp_file!=NULL)
+            {
+                uint64_t bbl_addr;
+                uint64_t num_prefetch;
+                uint64_t target;
+                while(fscanf(tmp_file, "%" SCNu64 " %" SCNu64 " ", &bbl_addr, &num_prefetch) != EOF)
+                {
+                    if(zinfo->iprefetch_bbl_to_cl_address_map.find(bbl_addr)!=zinfo->iprefetch_bbl_to_cl_address_map.end())
+                    {
+                        panic("IPrefetch info file contains multiple line with same basic block address");
+                    }
+                    zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr]=vector<uint64_t>();
+                    for(int i = 0; i< num_prefetch;i++)
+                    {
+                        fscanf(tmp_file, "%" SCNu64 " ",&target);
+                        zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr].push_back(target);
+                    }
+                }
+            }
+            else
+            {
+                zinfo->enable_iprefetch = false;
+            }
+        }
+        else
+        {
+            zinfo->enable_iprefetch = false;
+        }
+    }
 
     InitGlobalStats();
 

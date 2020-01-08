@@ -480,6 +480,19 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec,&lbr) - curCycle;
         fetchCycle += fetchLat;
     }
+    
+    if(zinfo->enable_iprefetch)
+    {
+        if(zinfo->iprefetch_bbl_to_cl_address_map.find(bblAddr)!=zinfo->iprefetch_bbl_to_cl_address_map.end())
+        {
+            for(int tmp_index = 0; tmp_index < zinfo->iprefetch_bbl_to_cl_address_map[bblAddr].size(); tmp_index++)
+            {
+                Address fetchAddr = zinfo->iprefetch_bbl_to_cl_address_map[bblAddr][tmp_index];
+                uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec) - curCycle;
+                fetchCycle += fetchLat;
+            }
+        }
+    }
 
     // If fetch rules, take into account delay between fetch and decode;
     // If decode rules, different BBLs make the decoders skip a cycle
