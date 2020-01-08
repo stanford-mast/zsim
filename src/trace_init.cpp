@@ -1163,7 +1163,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                     zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr]=vector<uint64_t>();
                     for(uint32_t i = 0; i< num_prefetch;i++)
                     {
-                        fscanf(tmp_file, "%" SCNu64 " ",&target);
+                        if(fscanf(tmp_file, "%" SCNu64 " ",&target)==EOF)panic("Error while reading prefetch target address");
                         zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr].push_back(target);
                     }
                 }
