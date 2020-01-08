@@ -78,6 +78,7 @@
 #include "zsim.h"
 
 #include <stdio.h>
+#include <inttypes.h>
 
 using namespace std;
 
