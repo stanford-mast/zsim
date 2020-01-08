@@ -1144,7 +1144,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->enable_iprefetch = config.get<bool>("sim.enable_iprefetch", false);
     if(zinfo->enable_iprefetch)
     {
-        const char* iprefetch_info_file_name = realpath(conf.get<const char*>("sim.iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
+        const char* iprefetch_info_file_name = realpath(config.get<const char*>("sim.iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
         if(iprefetch_info_file_name!=nullptr)
         {
             FILE *tmp_file = fopen(iprefetch_info_file_name, "r");
