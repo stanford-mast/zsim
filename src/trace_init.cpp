@@ -1161,7 +1161,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                         panic("IPrefetch info file contains multiple line with same basic block address");
                     }
                     zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr]=vector<uint64_t>();
-                    for(int i = 0; i< num_prefetch;i++)
+                    for(uint32_t i = 0; i< num_prefetch;i++)
                     {
                         fscanf(tmp_file, "%" SCNu64 " ",&target);
                         zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr].push_back(target);
