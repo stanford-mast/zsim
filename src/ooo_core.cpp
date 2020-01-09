@@ -77,8 +77,8 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
 
     branchPred = new BranchPredictorPAg(properties->bp_nb, properties->bp_hb, properties->bp_lb);
     
-    lbr.set_log_file((_name+"miss-log").c_str());
-    lbr.set_log_file((_name+"bbl-log").c_str());
+    lbr.set_log_file((_name+"-miss-log").c_str());
+    lbr.set_full_log_file((_name+"-bbl-log").c_str());
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {
