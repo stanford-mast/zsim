@@ -60,7 +60,7 @@ public:
             result=cur_cycle-last_cycle;
             last_cycle = cur_cycle;
         }
-        if(full_log_file.is_open())full_log_file<<bbl_address<<","<<result<<endl;
+        if(full_log_file.is_open())full_log_file<<bbl_address<<","<<result<<std::endl;
         LBREntry new_entry(bbl_address, result);
         if(likely(_queue.size()==LBR_CAPACITY))
         {
