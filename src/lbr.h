@@ -36,6 +36,7 @@ private:
     std::deque<LBREntry> _queue;
     uint64_t last_cycle;
     std::ofstream log_file;
+    std::ofstream full_log_file;
 public:
     LBR_Stack()
     {
@@ -46,6 +47,10 @@ public:
     {
         log_file.open(path_name);
     }
+    void set_full_log_file(const char *path_name)
+    {
+        full_log_file.open(path_name);
+    }
     void push(uint64_t bbl_address=0, uint64_t cur_cycle=0)
     {
         uint64_t result = cur_cycle;
@@ -55,6 +60,7 @@ public:
             result=cur_cycle-last_cycle;
             last_cycle = cur_cycle;
         }
+        if(full_log_file.is_open())full_log_file<<bbl_address<<","<<result<<endl;
         LBREntry new_entry(bbl_address, result);
         if(likely(_queue.size()==LBR_CAPACITY))
         {
@@ -78,6 +84,7 @@ public:
     ~LBR_Stack()
     {
         if(log_file.is_open())log_file.close();
+        if(full_log_file.is_open())full_log_file.close();
     }
 };
 
