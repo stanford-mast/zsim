@@ -123,8 +123,8 @@ class LRUReplPolicy : public ReplPolicy {
                 }
                 std::sort(current_timestamps.begin(), current_timestamps.end());
                 uint64_t last = current_timestamps[0];
-                if(last>0)array[id] = last - 1 ;
-                else array[id] = 0;
+                if(last>1)array[id] = last - 1 ;
+                else array[id] = 1;
             }
             else
             {
