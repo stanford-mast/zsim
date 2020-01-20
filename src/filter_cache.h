@@ -170,14 +170,7 @@ class FilterCache : public Cache {
             {
                 req.core_lbr = nullptr;
             }
-            if(no_update_timestamp)
-            {
-                req.prefetch = 1;
-            }
-            else
-            {
-                // do nothing
-            }
+            req.no_update_timestamp = no_update_timestamp;
             uint64_t respCycle  = access(req);
 
             //Due to the way we do the locking, at this point the old address might be invalidated, but we have the new address guaranteed until we release the lock

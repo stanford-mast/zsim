@@ -111,6 +111,7 @@ struct MemReq {
     uint32_t prefetch;
     
     LBR_Stack * core_lbr;
+    bool no_update_timestamp;
 
     inline void set(Flag f) {flags |= f;}
     inline bool is (Flag f) const {return flags & f;}
