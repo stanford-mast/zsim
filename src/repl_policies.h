@@ -122,8 +122,15 @@ class LRUReplPolicy : public ReplPolicy {
                     current_timestamps.push_back(array[i]);
                 }
                 std::sort(current_timestamps.begin(), current_timestamps.end());
-                std::reverse(current_timestamps.begin(), current_timestamps.end());
-                array[id] = current_timestamps[2];
+                if((numLines%2)==0)
+                {
+                    array[id] = (current_timestamps[(numLines-1)/2] + current_timestamps[numLines/2])/2;
+                }
+                else
+                {
+                    array[id] = current_timestamps[numLines/2];
+                }
+                //array[id] = current_timestamps[2];
                 /*uint64_t last = current_timestamps[0];
                 if(last>1)array[id] = last - 1 ;
                 else array[id] = 1;*/
