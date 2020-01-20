@@ -489,7 +489,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             for(uint32_t tmp_index = 0; tmp_index < zinfo->iprefetch_bbl_to_cl_address_map[bblAddr].size(); tmp_index++)
             {
                 Address fetchAddr = zinfo->iprefetch_bbl_to_cl_address_map[bblAddr][tmp_index];
-                l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec);
+                l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
             }
         }
     }

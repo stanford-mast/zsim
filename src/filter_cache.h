@@ -129,7 +129,7 @@ class FilterCache : public Cache {
             parentStat->append(cacheStat);
         }
 
-        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr) {
+        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false) {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
@@ -138,7 +138,7 @@ class FilterCache : public Cache {
                 fGETSHit++;
                 return MAX(curCycle, availCycle);
             } else {
-                return replace(vLineAddr, idx, true, curCycle, pc, lbr);
+                return replace(vLineAddr, idx, true, curCycle, pc, lbr, no_update_timestamp);
             }
         }
 
@@ -156,7 +156,7 @@ class FilterCache : public Cache {
             }
         }
 
-        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr) {
+        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false) {
           //assert(prefetchQueue.empty());
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;
@@ -169,6 +169,14 @@ class FilterCache : public Cache {
             else
             {
                 req.core_lbr = nullptr;
+            }
+            if(no_update_timestamp)
+            {
+                req.prefetch = 1;
+            }
+            else
+            {
+                // do nothing
             }
             uint64_t respCycle  = access(req);
 
