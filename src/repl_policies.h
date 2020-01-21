@@ -117,23 +117,18 @@ class LRUReplPolicy : public ReplPolicy {
             if(req->no_update_timestamp)
             {
                 std::vector<uint64_t> current_timestamps;
+                uint32_t c = 0;
                 for(uint32_t i=0; i<numLines; i++)
                 {
+                    if(array[i]==0)continue;
+                    c+=1;
                     current_timestamps.push_back(array[i]);
                 }
                 std::sort(current_timestamps.begin(), current_timestamps.end());
-                if((numLines%2)==0)
-                {
-                    array[id] = (current_timestamps[(numLines-1)/2] + current_timestamps[numLines/2])/2;
-                }
-                else
-                {
-                    array[id] = current_timestamps[numLines/2];
-                }
-                //array[id] = current_timestamps[2];
-                /*uint64_t last = current_timestamps[0];
-                if(last>1)array[id] = last - 1 ;
-                else array[id] = 1;*/
+                std::reverse(current_timestamps.begin(), current_timestamps.end());
+                uint32_t x = 2;
+                if(c>x)array[id] = current_timestamps[x];
+                else array[id] = current_timestamps[c/2];
             }
             else
             {
