@@ -79,6 +79,7 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
     
     lbr.set_log_file((_name+"-miss-log").c_str());
     lbr.set_full_log_file((_name+"-bbl-log").c_str());
+    lbr.set_bbl_info_file((_name+"-bbl-info").c_str());
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {
@@ -574,7 +575,7 @@ void OOOCore::PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT, BOOL pred) {
 
 void OOOCore::BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
     OOOCore* core = static_cast<OOOCore*>(cores[tid]);
-    core->lbr.push(bblAddr,core->curCycle);
+    core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
     core->bbl(bblAddr, bblInfo);
 
     while (core->curCycle > core->phaseEndCycle) {

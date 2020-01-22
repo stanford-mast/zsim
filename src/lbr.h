@@ -7,6 +7,7 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <set>
 
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
@@ -37,6 +38,8 @@ private:
     uint64_t last_cycle;
     std::ofstream log_file;
     std::ofstream full_log_file;
+    std::ofstream bbl_info_file;
+    std::set<uint64_t> observed_bbls;
 public:
     LBR_Stack()
     {
@@ -51,7 +54,11 @@ public:
     {
         full_log_file.open(path_name);
     }
-    void push(uint64_t bbl_address=0, uint64_t cur_cycle=0)
+    void set_bbl_info_file(const char *path_name)
+    {
+        bbl_info_file.open(path_name);
+    }
+    void push(uint64_t bbl_address=0, uint64_t cur_cycle=0, uint32_t instrs=0, uint32_t bytes=0)
     {
         uint64_t result = cur_cycle;
         if(cur_cycle!=0)
@@ -67,6 +74,11 @@ public:
             _queue.pop_front();
         }
         _queue.push_back(new_entry);
+        if(observed_bbls.find(bbl_address)==observed_bbls.end())
+        {
+            observed_bbls.insert(bbl_address);
+            if(bbl_info_file.is_open())bbl_info_file<<bbl_address<<","<<instrs<<","<<bytes<<std::endl;
+        }
     }
     std::string get_string()
     {
@@ -85,6 +97,8 @@ public:
     {
         if(log_file.is_open())log_file.close();
         if(full_log_file.is_open())full_log_file.close();
+        if(bbl_info_file.is_open())bbl_info_file.close();
+        observed_bbls.clear();
     }
 };
 
