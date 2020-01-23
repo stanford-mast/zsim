@@ -575,8 +575,8 @@ void OOOCore::PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT, BOOL pred) {
 
 void OOOCore::BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
     OOOCore* core = static_cast<OOOCore*>(cores[tid]);
-    core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
     core->bbl(bblAddr, bblInfo);
+    core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
 
     while (core->curCycle > core->phaseEndCycle) {
         core->phaseEndCycle += zinfo->phaseLength;
