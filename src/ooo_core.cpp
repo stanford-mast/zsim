@@ -77,9 +77,12 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
 
     branchPred = new BranchPredictorPAg(properties->bp_nb, properties->bp_hb, properties->bp_lb);
     
-    lbr.set_log_file((_name+"-miss-log").c_str());
-    lbr.set_full_log_file((_name+"-bbl-log").c_str());
-    lbr.set_bbl_info_file((_name+"-bbl-info").c_str());
+    if(zinfo->is_first_pass)
+    {
+        lbr.set_log_file((_name+"-miss-log").c_str());
+        lbr.set_full_log_file((_name+"-bbl-log").c_str());
+        lbr.set_bbl_info_file((_name+"-bbl-info").c_str());
+    }
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {
@@ -479,7 +482,9 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec,&lbr) - curCycle;
+        uint64_t fetchLat;
+        if(zinfo->is_first_pass) fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec,&lbr) - curCycle;
+        else fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec) - curCycle;
         fetchCycle += fetchLat;
     }
     
@@ -490,7 +495,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             for(uint32_t tmp_index = 0; tmp_index < zinfo->iprefetch_bbl_to_cl_address_map[bblAddr].size(); tmp_index++)
             {
                 Address fetchAddr = zinfo->iprefetch_bbl_to_cl_address_map[bblAddr][tmp_index];
-                l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
+                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
+                else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec);
             }
         }
     }
@@ -575,7 +581,7 @@ void OOOCore::PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT, BOOL pred) {
 
 void OOOCore::BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
     OOOCore* core = static_cast<OOOCore*>(cores[tid]);
-    core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
+    if(zinfo->is_first_pass)core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
     core->bbl(bblAddr, bblInfo);
 
     while (core->curCycle > core->phaseEndCycle) {

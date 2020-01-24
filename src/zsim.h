@@ -197,7 +197,10 @@ struct GlobSimInfo {
     
     //Tanvir BBL (key) to Prefetch Addresses (value) map
     bool enable_iprefetch;
-    std::unordered_map<uint64_t,std::vector<uint64_t>> iprefetch_bbl_to_cl_address_map; 
+    std::unordered_map<uint64_t,std::vector<uint64_t>> iprefetch_bbl_to_cl_address_map;
+    
+    bool is_first_pass;
+    bool prefetch_has_lower_replacement_priority;
 };
 
 
