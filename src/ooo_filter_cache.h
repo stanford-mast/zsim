@@ -127,7 +127,7 @@ public:
 #endif
 
         if (zeroLatencyCache) {
-            return dispatchCycle;
+            return dispatchCycle + accLat;
         }
 
         return respCycle;
@@ -143,7 +143,7 @@ public:
         executePrefetch(curCycle, dispatchCycle, 0, cRec);
 
         if (zeroLatencyCache) {
-            return dispatchCycle;
+            return dispatchCycle + accLat;
         }
 
         return respCycle;
