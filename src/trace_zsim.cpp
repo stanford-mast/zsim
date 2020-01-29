@@ -52,6 +52,7 @@
 #define DR_DO_NOT_DEFINE_uint64
 #endif  // ZSIM_USE_YT
 #include "trace_reader_memtrace.h"
+#include "trace_reader_pt.h"
 
 const uint32_t END_TRACE_SIM = ~0x0;
 const uint32_t CONTENTION_THREAD = ~0x0 - 1;
@@ -238,6 +239,9 @@ void *simtrace(void *arg) {
         reader = new TraceReaderYT(ti->tracefile, ti->binaries, bufsize);
     }
 #endif  // ZSIM_USE_YT
+    else if(ti->type.compare("PT") == 0) {
+        reader = new TraceReaderPT(ti->tracefile);
+    }
     else {
         panic("Tid %i: Unsupported trace format", tid);
     }

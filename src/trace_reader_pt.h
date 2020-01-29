@@ -81,7 +81,7 @@ public:
         PTInst next_line;
         if(read_next_line(next_line)==false)return &invalid_info_;
         processInst(&next_instruction, next_line);
-        return *next_instruction;
+        return &next_instruction;
     }
     ~TraceReaderPT()
     {
