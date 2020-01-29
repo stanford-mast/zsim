@@ -182,14 +182,19 @@ bool TraceReader::initBinary(const std::string &_name, uint64_t _offset) {
   return true;
 }
 
-void TraceReader::fillCache(uint64_t _vAddr, uint8_t _reported_size) {
+void TraceReader::fillCache(uint64_t _vAddr, uint8_t _reported_size, uint8_t *inst_bytes) {
   uint64_t size;
   uint8_t *loc;
-  if (locationForVAddr(_vAddr, &loc, &size)) {
+  if (inst_bytes != NULL || locationForVAddr(_vAddr, &loc, &size)) {
     xed_map_.emplace(_vAddr, make_tuple(
         0, false, false, false, make_unique<xed_decoded_inst_t>()));
     xed_decoded_inst_t *ins = get<MAP_XED>(xed_map_.at(_vAddr)).get();
     xed_decoded_inst_zero_set_mode(ins, &xed_state_);
+    if(inst_bytes!=NULL)
+    {
+      loc=inst_bytes;
+      size = _reported_size;
+    }
     xed_error_enum_t res = xed_decode(ins, loc, size);
 
     if (res != XED_ERROR_NONE) {

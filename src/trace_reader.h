@@ -133,7 +133,7 @@ class TraceReader {
   void init();
   bool initBinary(const std::string &_name, uint64_t _offset);
   void clearBinaries();
-  void fillCache(uint64_t _vAddr, uint8_t _reported_size);
+  void fillCache(uint64_t _vAddr, uint8_t _reported_size, uint8_t *inst_bytes=NULL);
   void traceFileIs(const std::string &_trace);
 };
 
