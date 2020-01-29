@@ -195,10 +195,12 @@ void TraceReader::fillCache(uint64_t _vAddr, uint8_t _reported_size, uint8_t *in
       loc=inst_bytes;
       size = _reported_size;
     }
-    xed_error_enum_t res = xed_decode(ins, loc, size);
+    xed_error_enum_t res;
+    if(inst_bytes!=NULL) res = xed_decode(ins, XED_STATIC_CAST(const xed_uint8_t*, inst_bytes), _reported_size);
+    else res = xed_decode(ins, loc, size);
 
     if (res != XED_ERROR_NONE) {
-      warn("XED decode error for 0x%lx: %s", _vAddr, xed_error_enum_t2str(res));
+      warn("XED decode error for 0x%lx: %s %u", _vAddr, xed_error_enum_t2str(res), _reported_size);
     }
     // Record if this instruction requires memory operands, since the trace
     // will deliver it in additional pieces
