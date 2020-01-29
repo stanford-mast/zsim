@@ -83,6 +83,20 @@ public:
         processInst(&next_instruction, next_line);
         return &next_instruction;
     }
+    void binaryGroupPathIs(const std::string &_path) override
+    {
+        //do nothing
+    }
+    bool initTrace() override
+    {
+        //do nothing
+        return true;
+    }
+    bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size) override
+    {
+        //do nothing
+        return true;
+    }
     ~TraceReaderPT()
     {
         if(raw_file!=NULL)gzclose(raw_file);
