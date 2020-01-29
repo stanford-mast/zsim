@@ -49,7 +49,7 @@ public:
         // Get the XED info from the cache, creating it if needed
         auto xed_map_iter = xed_map_.find(next_line.pc);
         if (xed_map_iter == xed_map_.end()) {
-            fillCache(next_line.pc, next_line.size);
+            fillCache(next_line.pc, next_line.size, next_line.inst_bytes);
             xed_map_iter = xed_map_.find(next_line.pc);
             assert((xed_map_iter != xed_map_.end()));
         }
