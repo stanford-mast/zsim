@@ -71,6 +71,12 @@ public:
         _info->mem_used[1] = false;
         _info->unknown_type = unknown_type;
         _info->valid = true;
+
+        for(int i = 0; i<mem_ops_; i++)
+        {
+            if(i>=2)break;
+            _info->mem_used[i]=true;
+        }
     }
     TraceReaderPT(const std::string &_trace)
     {
