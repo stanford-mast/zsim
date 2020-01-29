@@ -70,6 +70,7 @@ public:
         _info->mem_used[0] = false;
         _info->mem_used[1] = false;
         _info->unknown_type = unknown_type;
+        _info->valid = true;
     }
     TraceReaderPT(const std::string &_trace)
     {
