@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 
 #include <boost/algorithm/string.hpp>
 
@@ -25,6 +26,8 @@ class TraceReaderPT : public TraceReader
 private:
     gzFile raw_file = NULL;
     InstInfo next_instruction;
+    bool enable_code_bloat_effect = false;
+    std::map<uint64_t,uint64_t> *prev_to_new_bbl_address_map = nullptr;
 public:
     bool read_next_line(PTInst &inst)
     {
@@ -41,6 +44,25 @@ public:
         for(uint8_t i = 0; i<inst.size; i++)
         {
             inst.inst_bytes[i] = strtoul(parsed[i+2].c_str(), NULL, 16);
+        }
+        if(enable_code_bloat_effect && (prev_to_new_bbl_address_map != nullptr))
+        {
+            uint64_t result = inst.pc;
+            auto it = prev_to_new_bbl_address_map->lower_bound(inst.pc);
+            if(it->first == inst.pc)
+            {
+                result = it->second;
+            }
+            else
+            {
+                if(it==prev_to_new_bbl_address_map->begin())result=inst.pc;
+                else
+                {
+                    it--;
+                    result = it->second + (inst.pc - (it->first));
+                }
+            }
+            inst.pc = result;
         }
         return true;
     }
@@ -78,10 +100,12 @@ public:
             _info->mem_used[i]=true;
         }
     }
-    TraceReaderPT(const std::string &_trace)
+    TraceReaderPT(const std::string &_trace, bool _enable_code_bloat_effect = false, std::map<uint64_t,uint64_t> *_prev_to_new_bbl_address_map = nullptr)
     {
         raw_file = gzopen(_trace.c_str(), "rb");
         if(!raw_file)panic("TraceReaderPT: Invalid GZ File");
+        enable_code_bloat_effect = _enable_code_bloat_effect;
+        prev_to_new_bbl_address_map = _prev_to_new_bbl_address_map;
     }
     const InstInfo *getNextInstruction() override
     {

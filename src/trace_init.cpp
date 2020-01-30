@@ -1171,6 +1171,38 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                         zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr].push_back(target);
                     }
                 }
+                fclose(tmp_file);
+                zinfo->enable_code_bloat_effect = config.get<bool>("sim.enable_code_bloat_effect", false);
+                if(zinfo->enable_code_bloat_effect)
+                {
+                    const char* bbl_mapping_file_name = realpath(config.get<const char*>("sim.prev_to_new_bbl_address_map", nullptr), nullptr);
+                    if(bbl_mapping_file_name!=nullptr)
+                    {
+                        FILE *bbl_mapping_file = fopen(bbl_mapping_file_name, "r");
+                        if(bbl_mapping_file!=NULL)
+                        {
+                            uint64_t prev_bbl_addr, new_bbl_addr;
+                            zinfo->prev_to_new_bbl_address_map = std::map<uint64_t, uint64_t>();
+                            while(fscanf(bbl_mapping_file, "%" SCNu64 " %" SCNu64 " ", &prev_bbl_addr, &new_bbl_addr) != EOF)
+                            {
+                                if(zinfo->prev_to_new_bbl_address_map.find(prev_bbl_addr)!=zinfo->prev_to_new_bbl_address_map.end())
+                                {
+                                    panic("Prev to new bbl address map includes multiple mapping for the same file");
+                                }
+                                zinfo->prev_to_new_bbl_address_map[prev_bbl_addr] = new_bbl_addr;
+                            }
+                            fclose(bbl_mapping_file);
+                        }
+                        else
+                        {
+                            zinfo->enable_code_bloat_effect = false;
+                        }
+                    }
+                    else
+                    {
+                        zinfo->enable_code_bloat_effect = false;
+                    }
+                }
             }
             else
             {

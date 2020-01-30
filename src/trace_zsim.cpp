@@ -240,7 +240,14 @@ void *simtrace(void *arg) {
     }
 #endif  // ZSIM_USE_YT
     else if(ti->type.compare("PT") == 0) {
-        reader = new TraceReaderPT(ti->tracefile);
+        if(zinfo->enable_code_bloat_effect && zinfo->prev_to_new_bbl_address_map.size() > 0)
+        {
+            reader = new TraceReaderPT(ti->tracefile, zinfo->enable_code_bloat_effect, &(zinfo->prev_to_new_bbl_address_map));
+        }
+        else
+        {
+            reader = new TraceReaderPT(ti->tracefile);
+        }
     }
     else {
         panic("Tid %i: Unsupported trace format", tid);
