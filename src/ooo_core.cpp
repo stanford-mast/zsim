@@ -533,6 +533,7 @@ void OOOCore::join() {
 }
 
 void OOOCore::leave() {
+    if(zinfo->enable_iprefetch && (zinfo->iprefetch_buffer_size > 0))l1i->clearPrefetchBuffer();
     DEBUG_MSG("[%s] Leaving, curCycle %ld phaseEnd %ld", name.c_str(), curCycle, phaseEndCycle);
     cRec.notifyLeave(curCycle);
 }

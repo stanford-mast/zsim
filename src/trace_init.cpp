@@ -871,6 +871,7 @@ static void InitSystem(Config& config) {
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
                     ic->setType(FilterCache::Type::I);
+                    if(zinfo->enable_iprefetch && (zinfo->iprefetch_buffer_size>0))ic->setPrefetchBuffer(zinfo->iprefetch_buffer_size);
                     assignedCaches[icache]++;
 
                     if (assignedCaches[dcache] >= dgroup.size()) {
@@ -1172,6 +1173,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                     }
                 }
                 fclose(tmp_file);
+                zinfo->iprefetch_buffer_size = config.get<int>("sim.iprefetch_buffer_size", 0);
                 zinfo->enable_code_bloat_effect = config.get<bool>("sim.enable_code_bloat_effect", false);
                 if(zinfo->enable_code_bloat_effect)
                 {
