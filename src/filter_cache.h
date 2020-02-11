@@ -229,7 +229,7 @@ class FilterCache : public Cache {
             Address vLineAddr = vAddr >> lineBits;
             if(prefetch_buffer!=nullptr)
             {
-                prefetch_buffer->prefetch(vAddr, curCycle+prefetch_cost);
+                prefetch_buffer->prefetch(vLineAddr, curCycle+prefetch_cost);
             }
         }
 
