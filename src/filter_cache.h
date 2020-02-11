@@ -61,11 +61,11 @@ struct prefetched_info
 class PrefetchBuffer
 {
 private:
-    int capacity;
+    uint64_t capacity;
     std::list<prefetched_info> dq;
     std::unordered_map<Address,std::list<prefetched_info>::iterator> index;
 public:
-    PrefetchBuffer(int size)
+    PrefetchBuffer(uint64_t size)
     {
         capacity = size;
     }
@@ -342,7 +342,7 @@ class FilterCache : public Cache {
             futex_unlock(&filterLock);
         }
 
-        void setPrefetchBuffer(int capacity)
+        void setPrefetchBuffer(uint64_t capacity)
         {
             if(prefetch_buffer==nullptr)
             {

@@ -1173,7 +1173,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                     }
                 }
                 fclose(tmp_file);
-                zinfo->iprefetch_buffer_size = config.get<int>("sim.iprefetch_buffer_size", 0);
+                zinfo->iprefetch_buffer_size = config.get<uint64_t>("sim.iprefetch_buffer_size", 0);
                 zinfo->enable_code_bloat_effect = config.get<bool>("sim.enable_code_bloat_effect", false);
                 if(zinfo->enable_code_bloat_effect)
                 {
