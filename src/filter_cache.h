@@ -245,7 +245,7 @@ class FilterCache : public Cache {
             } else {
                 if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, availCycle))
                 {
-                    replace(vLineAddr, idx, false, curCycle, pc)
+                    replace(vLineAddr, idx, false, curCycle, pc);
                     return MAX(curCycle+accLat, availCycle);
                 }
                 else
