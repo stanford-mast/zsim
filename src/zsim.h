@@ -206,7 +206,7 @@ struct GlobSimInfo {
     bool is_first_pass;
     bool prefetch_has_lower_replacement_priority;
 
-    int iprefetch_buffer_size;
+    uint64_t iprefetch_buffer_size;
 };
 
 
