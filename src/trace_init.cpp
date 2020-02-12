@@ -77,6 +77,9 @@
 #endif  // ZSIM_USE_YT
 #include "zsim.h"
 
+#include <stdio.h>
+#include <inttypes.h>
+
 using namespace std;
 
 extern void EndOfPhaseActions(); //in zsim.cpp
@@ -868,6 +871,7 @@ static void InitSystem(Config& config) {
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
                     ic->setType(FilterCache::Type::I);
+                    if(zinfo->enable_iprefetch && (zinfo->iprefetch_buffer_size>0))ic->setPrefetchBuffer(zinfo->iprefetch_buffer_size);
                     assignedCaches[icache]++;
 
                     if (assignedCaches[dcache] >= dgroup.size()) {
@@ -1138,6 +1142,80 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->globalPauseFlag = config.get<bool>("sim.startInGlobalPause", false);
 
     zinfo->eventQueue = new EventQueue(); //must be instantiated before the memory hierarchy
+    
+    zinfo->is_first_pass = config.get<bool>("sim.is_first_pass", true);
+    zinfo->prefetch_has_lower_replacement_priority = config.get<bool>("sim.prefetch_has_lower_replacement_priority", false);
+    
+    zinfo->enable_iprefetch = config.get<bool>("sim.enable_iprefetch", false);
+    if(zinfo->enable_iprefetch)
+    {
+        const char* iprefetch_info_file_name = realpath(config.get<const char*>("sim.iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
+        if(iprefetch_info_file_name!=nullptr)
+        {
+            FILE *tmp_file = fopen(iprefetch_info_file_name, "r");
+            if(tmp_file!=NULL)
+            {
+                uint64_t bbl_addr;
+                uint64_t num_prefetch;
+                uint64_t target;
+                zinfo->iprefetch_bbl_to_cl_address_map = std::unordered_map<uint64_t,std::vector<uint64_t>>();
+                while(fscanf(tmp_file, "%" SCNu64 " %" SCNu64 " ", &bbl_addr, &num_prefetch) != EOF)
+                {
+                    if(zinfo->iprefetch_bbl_to_cl_address_map.find(bbl_addr)!=zinfo->iprefetch_bbl_to_cl_address_map.end())
+                    {
+                        panic("IPrefetch info file contains multiple line with same basic block address");
+                    }
+                    zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr]=vector<uint64_t>();
+                    for(uint32_t i = 0; i< num_prefetch;i++)
+                    {
+                        if(fscanf(tmp_file, "%" SCNu64 " ",&target)==EOF)panic("Error while reading prefetch target address");
+                        zinfo->iprefetch_bbl_to_cl_address_map[bbl_addr].push_back(target);
+                    }
+                }
+                fclose(tmp_file);
+                zinfo->iprefetch_buffer_size = config.get<uint64_t>("sim.iprefetch_buffer_size", 0);
+                zinfo->enable_code_bloat_effect = config.get<bool>("sim.enable_code_bloat_effect", false);
+                if(zinfo->enable_code_bloat_effect)
+                {
+                    const char* bbl_mapping_file_name = realpath(config.get<const char*>("sim.prev_to_new_bbl_address_map", nullptr), nullptr);
+                    if(bbl_mapping_file_name!=nullptr)
+                    {
+                        FILE *bbl_mapping_file = fopen(bbl_mapping_file_name, "r");
+                        if(bbl_mapping_file!=NULL)
+                        {
+                            uint64_t prev_bbl_addr, new_bbl_addr;
+                            zinfo->prev_to_new_bbl_address_map = std::map<uint64_t, uint64_t>();
+                            while(fscanf(bbl_mapping_file, "%" SCNu64 " %" SCNu64 " ", &prev_bbl_addr, &new_bbl_addr) != EOF)
+                            {
+                                if(zinfo->prev_to_new_bbl_address_map.find(prev_bbl_addr)!=zinfo->prev_to_new_bbl_address_map.end())
+                                {
+                                    panic("Prev to new bbl address map includes multiple mapping for the same file");
+                                }
+                                zinfo->prev_to_new_bbl_address_map[prev_bbl_addr] = new_bbl_addr;
+                            }
+                            fclose(bbl_mapping_file);
+                        }
+                        else
+                        {
+                            zinfo->enable_code_bloat_effect = false;
+                        }
+                    }
+                    else
+                    {
+                        zinfo->enable_code_bloat_effect = false;
+                    }
+                }
+            }
+            else
+            {
+                zinfo->enable_iprefetch = false;
+            }
+        }
+        else
+        {
+            zinfo->enable_iprefetch = false;
+        }
+    }
 
     InitGlobalStats();
 

@@ -76,6 +76,13 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
     for (uint32_t i = 0; i < FWD_ENTRIES; i++) fwdArray[i].set((Address)(-1L), 0);
 
     branchPred = new BranchPredictorPAg(properties->bp_nb, properties->bp_hb, properties->bp_lb);
+    
+    if(zinfo->is_first_pass)
+    {
+        lbr.set_log_file((_name+"-miss-log").c_str());
+        lbr.set_full_log_file((_name+"-bbl-log").c_str());
+        lbr.set_bbl_info_file((_name+"-bbl-info").c_str());
+    }
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {
@@ -397,8 +404,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
     // Check full match between expected and actual mem ops
     // If these assertions fail, most likely, something's off in the decoder
-    assert_msg(loadIdx == loads, "%s: loadIdx(%d) != loads (%d)", name.c_str(), loadIdx, loads);
-    assert_msg(storeIdx == stores, "%s: storeIdx(%d) != stores (%d)", name.c_str(), storeIdx, stores);
+    //assert_msg(loadIdx == loads, "%s: loadIdx(%d) != loads (%d)", name.c_str(), loadIdx, loads);
+    //assert_msg(storeIdx == stores, "%s: storeIdx(%d) != stores (%d)", name.c_str(), storeIdx, stores);
     loads = stores = 0;
 
 
@@ -475,8 +482,23 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         // Do not model fetch throughput limit here, decoder-generated stalls already include it
         // We always call fetches with curCycle to avoid upsetting the weave
         // models (but we could move to a fetch-centric recorder to avoid this)
-        uint64_t fetchLat = l1i->load(fetchAddr, curCycle, curCycle, 0 /*no PC*/, &cRec) - curCycle;
+        uint64_t fetchLat;
+        if(zinfo->is_first_pass) fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec,&lbr) - curCycle;
+        else fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec) - curCycle;
         fetchCycle += fetchLat;
+    }
+    
+    if(zinfo->enable_iprefetch)
+    {
+        if(zinfo->iprefetch_bbl_to_cl_address_map.find(bblAddr)!=zinfo->iprefetch_bbl_to_cl_address_map.end())
+        {
+            for(uint32_t tmp_index = 0; tmp_index < zinfo->iprefetch_bbl_to_cl_address_map[bblAddr].size(); tmp_index++)
+            {
+                Address fetchAddr = zinfo->iprefetch_bbl_to_cl_address_map[bblAddr][tmp_index];
+                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
+                else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec);
+            }
+        }
     }
 
     // If fetch rules, take into account delay between fetch and decode;
@@ -511,6 +533,7 @@ void OOOCore::join() {
 }
 
 void OOOCore::leave() {
+    if(zinfo->enable_iprefetch && (zinfo->iprefetch_buffer_size > 0))l1i->clearPrefetchBuffer();
     DEBUG_MSG("[%s] Leaving, curCycle %ld phaseEnd %ld", name.c_str(), curCycle, phaseEndCycle);
     cRec.notifyLeave(curCycle);
 }
@@ -559,6 +582,7 @@ void OOOCore::PredStoreFunc(THREADID tid, ADDRINT addr, ADDRINT, BOOL pred) {
 
 void OOOCore::BblFunc(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
     OOOCore* core = static_cast<OOOCore*>(cores[tid]);
+    if(zinfo->is_first_pass)core->lbr.push(bblAddr,core->curCycle,bblInfo->instrs,bblInfo->bytes);
     core->bbl(bblAddr, bblInfo);
 
     while (core->curCycle > core->phaseEndCycle) {

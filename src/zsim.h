@@ -33,6 +33,10 @@
 #include "locks.h"
 #include "pad.h"
 
+#include <unordered_map>
+#include <map>
+#include <vector>
+
 // XXX hack for prefetcher
 class CachePrefetcher;
 
@@ -191,6 +195,18 @@ struct GlobSimInfo {
     //XXX Hack
     CachePrefetcher* prefetcher;
     TraceReader** readers;
+    
+    //Tanvir BBL (key) to Prefetch Addresses (value) map
+    bool enable_iprefetch;
+    std::unordered_map<uint64_t,std::vector<uint64_t>> iprefetch_bbl_to_cl_address_map;
+
+    bool enable_code_bloat_effect;
+    std::map<uint64_t,uint64_t> prev_to_new_bbl_address_map;
+    
+    bool is_first_pass;
+    bool prefetch_has_lower_replacement_priority;
+
+    uint64_t iprefetch_buffer_size;
 };
 
 

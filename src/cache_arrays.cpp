@@ -173,6 +173,13 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
         profPrefNotInCache.inc();
     }
 
+#ifdef LOG_L1I_MISS_LBR
+    if(req->core_lbr)
+    {
+        req->core_lbr->log_event(req->pc,lineAddr);
+    }
+#endif
+
 #ifdef MONITOR_MISS_PCS
     //Gather Load PC miss stats
     if (MONITORED_PCS && isDemandLoad(req)) {

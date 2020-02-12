@@ -33,6 +33,9 @@
 #include "memory_hierarchy.h"
 #include "mtrand.h"
 
+#include <vector>
+#include <algorithm>
+
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
  * - On each replacement, rank() is called with the req and a list of replacement candidates.
@@ -111,7 +114,26 @@ class LRUReplPolicy : public ReplPolicy {
         }
 
         void update(uint32_t id, const MemReq* req) {
-            array[id] = timestamp++;
+            if(req->no_update_timestamp)
+            {
+                std::vector<uint64_t> current_timestamps;
+                uint32_t c = 0;
+                for(uint32_t i=0; i<numLines; i++)
+                {
+                    if(array[i]==0)continue;
+                    c+=1;
+                    current_timestamps.push_back(array[i]);
+                }
+                std::sort(current_timestamps.begin(), current_timestamps.end());
+                std::reverse(current_timestamps.begin(), current_timestamps.end());
+                uint32_t x = 2;
+                if(c>x)array[id] = current_timestamps[x];
+                else array[id] = current_timestamps[c/2];
+            }
+            else
+            {
+                array[id] = timestamp++;
+            }
         }
 
         void replaced(uint32_t id) {
