@@ -127,6 +127,7 @@ public:
             numLinesNLP = 0;
             zeroLatencyCache = false;
             pref_degree = 0;
+            prefetch_buffer = nullptr;
         }
 
     explicit OOOFilterCache(uint32_t _numSets, uint32_t _numLines, CC* _cc,
@@ -138,6 +139,7 @@ public:
         {
             numLinesNLP = _numLinesNLP;
             zeroLatencyCache = _zeroLatencyCache;
+            prefetch_buffer = nullptr;
         }
 
 #ifdef TRACE_BASED
