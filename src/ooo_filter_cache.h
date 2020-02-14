@@ -205,7 +205,7 @@ public:
         uint64_t prefetchBufferCycle;
         if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
         {
-            return MAX(dispatchCycle+accLat,prefetchBufferCycle);
+            return MIN(respCycle,prefetchBufferCycle);
         }
 
         return respCycle;
@@ -228,7 +228,7 @@ public:
         Address vLineAddr = vAddr >> lineBits;
         if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
         {
-            return MAX(dispatchCycle+accLat,prefetchBufferCycle);
+            return MIN(respCycle,prefetchBufferCycle);
         }
 
         return respCycle;
@@ -300,7 +300,7 @@ public:
 
     inline void prefetch_into_buffer(Address vAddr, uint64_t curCycle)
     {
-        const uint64_t prefetch_cost = 27;
+        const uint64_t prefetch_cost = 7;
         Address vLineAddr = vAddr >> lineBits;
         if(prefetch_buffer!=nullptr)
         {
