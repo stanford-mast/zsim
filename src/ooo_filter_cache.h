@@ -203,7 +203,6 @@ public:
             return dispatchCycle + accLat;
         }
         uint64_t prefetchBufferCycle;
-        Address vLineAddr = vAddr >> lineBits;
         if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
         {
             return MAX(dispatchCycle+accLat,prefetchBufferCycle);
