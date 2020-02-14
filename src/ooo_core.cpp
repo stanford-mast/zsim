@@ -496,14 +496,14 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             {
                 Address fetchAddr = zinfo->iprefetch_bbl_to_cl_address_map[bblAddr][tmp_index];
                 if(zinfo->iprefetch_buffer_size>0)
-		{
-		    l1i->prefetch_into_buffer(fetchAddr, curCycle);
-		}
-		else
-		{
-		    if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
+		        {
+		            l1i->prefetch_into_buffer(fetchAddr, curCycle);
+		        }
+                else
+                {
+                    if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
                     else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec);
-		}
+                }
             }
         }
     }

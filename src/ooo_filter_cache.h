@@ -34,6 +34,78 @@
 
 #include "lbr.h"
 
+#include <list>
+#include <unordered_map>
+
+struct prefetched_info
+{
+    Address vAddrLine;
+    uint64_t availCycle;
+    prefetched_info(Address _vAddrLine, uint64_t _availCycle)
+    {
+        vAddrLine = _vAddrLine;
+        availCycle = _availCycle;
+    }
+};
+
+
+class PrefetchBuffer
+{
+private:
+    uint64_t capacity;
+    std::list<prefetched_info> dq;
+    std::unordered_map<Address,std::list<prefetched_info>::iterator> index;
+public:
+    PrefetchBuffer(uint64_t size)
+    {
+        capacity = size;
+    }
+    bool prefetch(Address addr, uint64_t availCycle)
+    {
+        bool was_present;
+        uint64_t effectiveAvailCycle = availCycle;
+        if(index.find(addr)==index.end())
+        {
+            was_present = false;
+            if(likely(dq.size()==capacity))
+            {
+                Address to_be_removed = dq.back().vAddrLine;
+                dq.pop_back();
+                index.erase(to_be_removed);
+            }
+        }
+        else
+        {
+            was_present = true;
+            effectiveAvailCycle = MIN(index[addr]->availCycle, effectiveAvailCycle);
+            dq.erase(index[addr]);
+        }
+        dq.push_front(prefetched_info(addr, effectiveAvailCycle));
+        index[addr]=dq.begin();
+        return was_present;
+    }
+    bool transfer(Address addr, uint64_t &availCycle)
+    {
+        if(index.find(addr)==index.end())
+        {
+            return false;
+        }
+        availCycle = index[addr]->availCycle;
+        dq.erase(index[addr]);
+        index.erase(addr);
+        return true;
+    }
+    void clear()
+    {
+        index.clear();
+        dq.clear();
+    }
+    ~PrefetchBuffer()
+    {
+        clear();
+    }
+};
+
 class OOOFilterCache : public FilterCache {
 private:
     //Number of lines to prefetch for a Next line prefetcher
@@ -43,6 +115,7 @@ private:
 #ifdef TRACE_BASED
     DataflowPrefetcher *dataflow_prefetcher;
 #endif
+    PrefetchBuffer *prefetch_buffer = nullptr;
 
 public:
     OOOFilterCache(uint32_t _numSets, uint32_t _numLines, CC* _cc,
@@ -129,6 +202,11 @@ public:
         if (zeroLatencyCache) {
             return dispatchCycle + accLat;
         }
+        uint64_t prefetchBufferCycle;
+        if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
+        {
+            return MAX(dispatchCycle+accLat,prefetchBufferCycle);
+        }
 
         return respCycle;
     }
@@ -144,6 +222,12 @@ public:
 
         if (zeroLatencyCache) {
             return dispatchCycle + accLat;
+        }
+        
+        uint64_t prefetchBufferCycle;
+        if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
+        {
+            return MAX(dispatchCycle+accLat,prefetchBufferCycle);
         }
 
         return respCycle;
@@ -196,6 +280,32 @@ public:
     }
 
     inline uint32_t getAccLat() { return accLat; }
+
+    void setPrefetchBuffer(uint64_t capacity)
+    {
+        if(prefetch_buffer==nullptr)
+        {
+            prefetch_buffer = new PrefetchBuffer(capacity);
+        }
+    }
+    void clearPrefetchBuffer()
+    {
+        if(prefetch_buffer!=nullptr)
+        {
+            prefetch_buffer->clear();
+            delete prefetch_buffer;
+        }
+    }
+
+    inline void prefetch_into_buffer(Address vAddr, uint64_t curCycle)
+    {
+        const uint64_t prefetch_cost = 27;
+        Address vLineAddr = vAddr >> lineBits;
+        if(prefetch_buffer!=nullptr)
+        {
+            prefetch_buffer->prefetch(vLineAddr, curCycle+prefetch_cost);
+        }
+    }
 };
 
 #endif
