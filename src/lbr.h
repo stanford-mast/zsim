@@ -91,7 +91,7 @@ public:
         else if (bbl_size_difference_check[bbl_address].find(instrs)==bbl_size_difference_check[bbl_address].end())
         {
             bbl_size_difference_check[bbl_address].insert(instrs);
-            if(self_modifying_bbl_info_file.is_open())self_modifying_bbl_info_file<<bbl_address<<","<<instrs<<bytes<<std::endl;
+            if(self_modifying_bbl_info_file.is_open())self_modifying_bbl_info_file<<bbl_address<<","<<instrs<<","<<bytes<<std::endl;
         }
     }
     std::string get_string()
