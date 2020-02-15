@@ -62,7 +62,7 @@ public:
     {
         bbl_info_file.open(path_name);
         std::string tmp(path_name);
-        tmp+="_self_modifying_info";
+        tmp+="-self-modifying";
         self_modifying_bbl_info_file.open(tmp.c_str());
     }
     void push(uint64_t bbl_address=0, uint64_t cur_cycle=0, uint32_t instrs=0, uint32_t bytes=0)
