@@ -43,7 +43,7 @@ private:
     std::ofstream bbl_info_file;
     std::ofstream self_modifying_bbl_info_file;
     std::set<uint64_t> observed_bbls;
-    std::unordered_map<uint64_t,set<uint32_t>> bbl_size_difference_check;
+    std::unordered_map<uint64_t,std::set<uint32_t>> bbl_size_difference_check;
 public:
     LBR_Stack()
     {
