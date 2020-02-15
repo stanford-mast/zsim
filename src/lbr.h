@@ -88,9 +88,10 @@ public:
             bbl_size_difference_check[bbl_address]=std::set<uint32_t>();
             bbl_size_difference_check[bbl_address].insert(instrs);
         }
-        else
+        else if (bbl_size_difference_check[bbl_address].find(instrs)==bbl_size_difference_check[bbl_address].end())
         {
             bbl_size_difference_check[bbl_address].insert(instrs);
+            if(self_modifying_bbl_info_file.is_open())self_modifying_bbl_info_file<<bbl_address<<","<<instrs<<bytes<<std::endl;
         }
     }
     std::string get_string()
@@ -112,23 +113,8 @@ public:
         if(full_log_file.is_open())full_log_file.close();
         if(bbl_info_file.is_open())bbl_info_file.close();
         observed_bbls.clear();
-        if(self_modifying_bbl_info_file.is_open())
-        {
-            for(auto it: bbl_size_difference_check)
-            {
-                if(it.second.size() > 1)
-                {
-                    self_modifying_bbl_info_file<<it.first;
-                    for(auto ti: it.second)
-                    {
-                        self_modifying_bbl_info_file<<","<<ti;
-                    }
-                    self_modifying_bbl_info_file<<std::endl;
-                }
-                it.second.clear();
-            }
-            self_modifying_bbl_info_file.close();
-        }
+        if(self_modifying_bbl_info_file.is_open())self_modifying_bbl_info_file.close();
+        for(auto it: bbl_size_difference_check)it.second.clear();
         bbl_size_difference_check.clear();
     }
 };

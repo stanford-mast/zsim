@@ -399,7 +399,7 @@ void *simtrace(void *arg) {
                     if (INS_Category(insi->ins) == XED_CATEGORY_COND_BR) {
                         uint64_t fall_through_addr = bbl_to_sim->first + size_bytes;
                         //Check that the branch is the last instruction of the BBL
-                        //assert(i + 1 == bbl_to_sim->second.nr_inst);
+                        assert(i + 1 == bbl_to_sim->second.nr_inst);
                         fPtrs[tid].branchPtr(tid, insi->pc, insi->taken, insi->target, fall_through_addr);
                     }
                 }
