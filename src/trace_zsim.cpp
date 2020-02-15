@@ -301,7 +301,7 @@ void *simtrace(void *arg) {
             /* In Memtrace, basic blocks can be interrupted by signal handlers and potentially for
              * other reasons which is why we cannot cache basic blocks and need to decode and
              * simulate each instruction individually */
-            bool cache_bbl = ti->type != "MEMTRACE";
+            bool cache_bbl = (ti->type != "MEMTRACE") || (ti->type != "PT");
 
             while (1) {
                 bbl.push_back(*insi);

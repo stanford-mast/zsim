@@ -8,6 +8,8 @@
 #include <fstream>
 #include <iostream>
 #include <set>
+#include <unordered_map>
+#include <string>
 
 #define ENABLE_LBR
 #define LBR_CAPACITY 32
@@ -39,7 +41,9 @@ private:
     std::ofstream log_file;
     std::ofstream full_log_file;
     std::ofstream bbl_info_file;
+    std::ofstream self_modifying_bbl_info_file;
     std::set<uint64_t> observed_bbls;
+    std::unordered_map<uint64_t,set<uint32_t>> bbl_size_difference_check;
 public:
     LBR_Stack()
     {
@@ -57,6 +61,9 @@ public:
     void set_bbl_info_file(const char *path_name)
     {
         bbl_info_file.open(path_name);
+        std::string tmp(path_name);
+        tmp+="_self_modifying_info";
+        self_modifying_bbl_info_file.open(tmp.c_str());
     }
     void push(uint64_t bbl_address=0, uint64_t cur_cycle=0, uint32_t instrs=0, uint32_t bytes=0)
     {
@@ -78,6 +85,12 @@ public:
         {
             observed_bbls.insert(bbl_address);
             if(bbl_info_file.is_open())bbl_info_file<<bbl_address<<","<<instrs<<","<<bytes<<std::endl;
+            bbl_size_difference_check[bbl_address]=set<uint32_t>();
+            bbl_size_difference_check[bbl_address].insert(instrs);
+        }
+        else
+        {
+            bbl_size_difference_check[bbl_address].insert(instrs);
         }
     }
     std::string get_string()
@@ -99,6 +112,24 @@ public:
         if(full_log_file.is_open())full_log_file.close();
         if(bbl_info_file.is_open())bbl_info_file.close();
         observed_bbls.clear();
+        if(self_modifying_bbl_info_file.is_open())
+        {
+            for(auto it: bbl_size_difference_check)
+            {
+                if(it.second.size() > 1)
+                {
+                    self_modifying_bbl_info_file<<it.first;
+                    for(auto ti: it.second)
+                    {
+                        self_modifying_bbl_info_file<<","<<ti;
+                    }
+                    self_modifying_bbl_info_file<<std::endl;
+                }
+                it.second.clear();
+            }
+            self_modifying_bbl_info_file.close();
+        }
+        bbl_size_difference_check.clear();
     }
 };
 
