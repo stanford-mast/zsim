@@ -85,7 +85,7 @@ public:
         {
             observed_bbls.insert(bbl_address);
             if(bbl_info_file.is_open())bbl_info_file<<bbl_address<<","<<instrs<<","<<bytes<<std::endl;
-            bbl_size_difference_check[bbl_address]=set<uint32_t>();
+            bbl_size_difference_check[bbl_address]=std::set<uint32_t>();
             bbl_size_difference_check[bbl_address].insert(instrs);
         }
         else
