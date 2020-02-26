@@ -518,7 +518,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             {
                 uint64_t predicate = it.first;
                 auto &tmp_list = it.second;
-                for(int k=0;k<last_eight_bbl_addrs.size(); k++)
+                for(unsigned k=0;k<last_eight_bbl_addrs.size(); k++)
                 {
                     if(last_eight_bbl_addrs[k]==predicate)
                     {
