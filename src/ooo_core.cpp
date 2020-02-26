@@ -83,6 +83,8 @@ OOOCore::OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name, Co
         lbr.set_full_log_file((_name+"-bbl-log").c_str());
         lbr.set_bbl_info_file((_name+"-bbl-info").c_str());
     }
+
+    last_eight_bbl_addrs = std::deque<uint64_t>();
   }
 
 void OOOCore::initStats(AggregateStat* parentStat) {
@@ -507,6 +509,41 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             }
         }
     }
+
+    if(zinfo->enable_cs_iprefetch)
+    {
+        if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(bblAddr)!=zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
+        {
+            for(auto it: zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[bblAddr])
+            {
+                uint64_t predicate = it.first;
+                auto &tmp_list = it.second;
+                for(int k=0;k<last_eight_bbl_addrs.size(); k++)
+                {
+                    if(last_eight_bbl_addrs[k]==predicate)
+                    {
+                        for(auto vec_it: tmp_list)
+                        {
+                            if(zinfo->iprefetch_buffer_size>0)
+                            {
+                                l1i->prefetch_into_buffer(vec_it, curCycle);
+                            }
+                            else
+                            {
+                                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
+                                else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if(likely(last_eight_bbl_addrs.size()==8))
+    {
+        last_eight_bbl_addrs.pop_front();
+    }
+    last_eight_bbl_addrs.push_back(bblAddr); 
 
     // If fetch rules, take into account delay between fetch and decode;
     // If decode rules, different BBLs make the decoders skip a cycle

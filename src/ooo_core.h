@@ -446,6 +446,7 @@ class OOOCore : public Core {
         OOOCoreRecorder cRec;
 
         LBR_Stack lbr;
+        std::deque<uint64_t> last_eight_bbl_addrs;
 
     public:
         OOOCore(OOOFilterCache* _l1i, OOOFilterCache* _l1d, g_string& _name,

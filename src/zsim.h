@@ -200,6 +200,9 @@ struct GlobSimInfo {
     bool enable_iprefetch;
     std::unordered_map<uint64_t,std::vector<uint64_t>> iprefetch_bbl_to_cl_address_map;
 
+    bool enable_cs_iprefetch;
+    std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::vector<uint64_t>>> cs_iprefetch_bbl_to_predicate_to_cl_address_map;
+
     bool enable_code_bloat_effect;
     std::map<uint64_t,uint64_t> prev_to_new_bbl_address_map;
     

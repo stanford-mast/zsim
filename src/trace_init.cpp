@@ -1217,6 +1217,42 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         }
     }
 
+    const char* cs_iprefetch_info_file_name = realpath(config.get<const char*>("sim.cs_iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
+    if(cs_iprefetch_info_file_name!=nullptr)
+    {
+        FILE *tmp_file = fopen(cs_iprefetch_info_file_name, "r");
+        if(tmp_file!=NULL)
+        {
+            uint64_t prefetch_candidate_predicate;
+            uint64_t prefetch_candidate_predecessor;
+            uint64_t missed_pc;
+            zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map = std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::vector<uint64_t>>>();
+            while(fscanf(tmp_file, "%" SCNu64 " %" SCNu64 " %" SCNu64 " ", &prefetch_candidate_predicate, &prefetch_candidate_predecessor, &missed_pc) != EOF)
+            {
+                if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(prefetch_candidate_predecessor)==zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
+                {
+                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor]=std::unordered_map<uint64_t,std::vector<uint64_t>>();
+                }
+                if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor].find(prefetch_candidate_predicate)==zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor].end())
+                {
+                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor][prefetch_candidate_predicate]=std::vector<uint64_t>();
+                }
+                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor][prefetch_candidate_predicate].push_back(missed_pc);
+            }
+            fclose(tmp_file);
+        }
+        else
+        {
+            zinfo->enable_cs_iprefetch = false;
+        }
+        
+    }
+    else
+    {
+        zinfo->enable_cs_iprefetch = false;
+    }
+    
+
     InitGlobalStats();
 
     //Core stats (initialized here for cosmetic reasons, to be above cache stats)
