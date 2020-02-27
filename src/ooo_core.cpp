@@ -503,8 +503,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 		        }
                 else
                 {
-                    if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
-                    else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec);
+                    if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                    else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
                 }
             }
         }
@@ -530,8 +530,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                             }
                             else
                             {
-                                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true);
-                                else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec);
+                                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                                else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
                             }
                         }
                     }

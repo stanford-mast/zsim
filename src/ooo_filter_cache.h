@@ -172,10 +172,10 @@ public:
 
     inline uint64_t load(Address vAddr, uint64_t curCycle,
                          uint64_t dispatchCycle, Address pc,
-                         OOOCoreRecorder *cRec, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false) {
+                         OOOCoreRecorder *cRec, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false, bool is_prefetch=false) {
         Address vLineAddr = vAddr >> lineBits;
         //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc,lbr,no_update_timestamp) + accLat;
+        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc,lbr,no_update_timestamp,is_prefetch) + accLat;
         cRec->record(curCycle, dispatchCycle, respCycle);
 
         //Support legacy prefetching flow for backwards compatibility

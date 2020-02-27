@@ -129,7 +129,7 @@ class FilterCache : public Cache {
             parentStat->append(cacheStat);
         }
 
-        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false) {
+        inline uint64_t load(Address vAddr, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false, bool is_prefetch=false) {
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
@@ -138,7 +138,7 @@ class FilterCache : public Cache {
                 fGETSHit++;
                 return MAX(curCycle, availCycle);
             } else {
-                return replace(vLineAddr, idx, true, curCycle, pc, lbr, no_update_timestamp);
+                return replace(vLineAddr, idx, true, curCycle, pc, lbr, no_update_timestamp,is_prefetch);
             }
         }
 
@@ -156,7 +156,7 @@ class FilterCache : public Cache {
             }
         }
 
-        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false) {
+        uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle, Address pc, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false, bool is_prefetch=false) {
           //assert(prefetchQueue.empty());
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;
@@ -171,6 +171,10 @@ class FilterCache : public Cache {
                 req.core_lbr = nullptr;
             }
             req.no_update_timestamp = no_update_timestamp;
+            if(is_prefetch)
+            {
+                req.flags = req.flags| MemReq::SPECULATIVE;
+            }
             uint64_t respCycle  = access(req);
 
             //Due to the way we do the locking, at this point the old address might be invalidated, but we have the new address guaranteed until we release the lock
