@@ -1240,6 +1240,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                 zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor][prefetch_candidate_predicate].push_back(missed_pc);
             }
             fclose(tmp_file);
+            zinfo->enable_cs_iprefetch = true;
         }
         else
         {
