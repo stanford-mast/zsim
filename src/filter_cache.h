@@ -134,7 +134,7 @@ class FilterCache : public Cache {
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
 
-            if (vLineAddr == filterArray[idx].rdAddr) {
+            if (vLineAddr == filterArray[idx].rdAddr && availCycle < curCycle) {
                 fGETSHit++;
                 return MAX(curCycle+accLat, availCycle);
             } else {
