@@ -136,7 +136,7 @@ class FilterCache : public Cache {
 
             if (vLineAddr == filterArray[idx].rdAddr) {
                 fGETSHit++;
-                return MAX(curCycle, availCycle);
+                return MAX(curCycle+accLat, availCycle);
             } else {
                 return replace(vLineAddr, idx, true, curCycle, pc, lbr, no_update_timestamp,is_prefetch);
             }
@@ -150,7 +150,7 @@ class FilterCache : public Cache {
                 fGETXHit++;
                 //NOTE: Stores don't modify availCycle; we'll catch matches in the core
                 //filterArray[idx].availCycle = curCycle; //do optimistic store-load forwarding
-                return MAX(curCycle, availCycle);
+                return MAX(curCycle+accLat, availCycle);
             } else {
                 return replace(vLineAddr, idx, false, curCycle, pc);
             }
