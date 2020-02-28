@@ -210,9 +210,9 @@ class FilterCache : public Cache {
         }
 
         void executePrefetch(uint64_t curCycle, uint64_t dispatchCycle, uint64_t reqSatisfiedCycle, OOOCoreRecorder *cRec) {
-            futex_lock(&filterLock);
             //Send out any prefetch requests that were created during the prior access
             if (unlikely(!prefetchQueue.empty())) {
+                futex_lock(&filterLock);
                 uint64_t respCycle = dispatchCycle;
                 for (auto& prefetch : prefetchQueue) {
                     MESIState dummyState = MESIState::I;
@@ -225,9 +225,9 @@ class FilterCache : public Cache {
                     respCycle = access(req);
                     cRec->record(curCycle, dispatchCycle, respCycle);
                 }
+                futex_unlock(&filterLock);
                 prefetchQueue.clear();
             }
-            futex_unlock(&filterLock);
         }
 
         void contextSwitch() {
