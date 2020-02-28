@@ -133,9 +133,12 @@ class FilterCache : public Cache {
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
 
-            if (vLineAddr == filterArray[idx].rdAddr) {
+	    //Only read from filter cache if line is already present, otherwise perform L1  access
+	    //This introduces a 3% slow down but improves fidelty in the case of out-of-order loads
+	    //(zsim executes loads potentially OOO as BBL instructions are executed sequentially) 
+            if (vLineAddr == filterArray[idx].rdAddr && availCycle < curCycle) {
                 fGETSHit++;
-                return MAX(curCycle, availCycle);
+                return MAX(curCycle + accLat, availCycle);
             } else {
                 return replace(vLineAddr, idx, true, curCycle, pc);
             }
@@ -149,7 +152,7 @@ class FilterCache : public Cache {
                 fGETXHit++;
                 //NOTE: Stores don't modify availCycle; we'll catch matches in the core
                 //filterArray[idx].availCycle = curCycle; //do optimistic store-load forwarding
-                return MAX(curCycle, availCycle);
+                return MAX(curCycle + accLat, availCycle);
             } else {
                 return replace(vLineAddr, idx, false, curCycle, pc);
             }
