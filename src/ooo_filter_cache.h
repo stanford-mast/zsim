@@ -181,15 +181,16 @@ public:
         //Support legacy prefetching flow for backwards compatibility
         executePrefetch(curCycle, dispatchCycle, 0, cRec);
 
-        // Access based Next Line Prefetcher
-        // Default value for number of lines to prefetch is 0,
-        // in which case we don't prefetch anything.
-        // How many next lines to prefetch can be configured in the config.
-        for (uint32_t numLines = 1; numLines <= numLinesNLP; numLines++) {
-            Address pLineAddr = procMask | vLineAddr;
-            Address nextPLineAddr = pLineAddr + numLines;
-            issuePrefetch(nextPLineAddr, 0/*prefetch into L1*/, curCycle,
-                          dispatchCycle, cRec, 0 /*No PC*/, false);
+        if(is_prefetch)
+        {
+            //
+        }
+        else
+        {.
+            for (uint32_t numLines = 1; numLines <= numLinesNLP; numLines++) {
+                Address nextVLineAddr = (vLineAddr+numLines) << lineBits;
+                load(nextVLineAddr, curCycle, dispatchCycle, pc, cRec, nullptr, no_update_timestamp, true);
+            }
         }
 #ifdef TRACE_BASED
         //Access Dataflow Prefetcher
