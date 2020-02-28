@@ -188,8 +188,9 @@ public:
         else
         {
             for (uint32_t numLines = 1; numLines <= numLinesNLP; numLines++) {
-                Address nextVLineAddr = (vLineAddr+numLines) << lineBits;
-                load(nextVLineAddr, curCycle, dispatchCycle, pc, cRec, nullptr, no_update_timestamp, true);
+                Address pLineAddr = procMask | vLineAddr;
+                Address nextPLineAddr = pLineAddr + numLines;
+                issuePrefetch(nextPLineAddr, 0/*prefetch into L1*/, curCycle, dispatchCycle, cRec, 0 /*No PC*/, false);
             }
         }
 #ifdef TRACE_BASED
