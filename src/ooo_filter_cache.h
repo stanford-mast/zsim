@@ -178,7 +178,7 @@ public:
         {
             Address vLineAddr = vAddr >> lineBits;
             Address prefetchLineAddr = procMask | vLineAddr;
-            return issuePrefetch(prefetchLineAddr, 0/*prefetch into L1*/, curCycle, dispatchCycle, cRec, 0 /*No PC*/, false, no_update_timestamp);
+            return issuePrefetch(prefetchLineAddr, 0/*prefetch into L1*/, curCycle, dispatchCycle, cRec, 0 /*No PC*/, true, no_update_timestamp);
         }
         else
         {
