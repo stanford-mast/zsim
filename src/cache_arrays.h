@@ -80,7 +80,7 @@ class SetAssocArray : public CacheArray {
         uint32_t setMask;
 
 #ifdef MONITOR_MISS_PCS
-        static const uint32_t MONITORED_PCS = 10;
+        static const uint32_t MONITORED_PCS = 25;
         g_unordered_map<uint64_t, uint64_t> miss_pcs;
         g_unordered_map<uint64_t, uint64_t> hit_pcs;
         g_unordered_map<uint64_t, uint64_t> late_addr;
