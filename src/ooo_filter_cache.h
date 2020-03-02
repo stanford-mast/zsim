@@ -173,46 +173,46 @@ public:
     inline uint64_t load(Address vAddr, uint64_t curCycle,
                          uint64_t dispatchCycle, Address pc,
                          OOOCoreRecorder *cRec, LBR_Stack *lbr=nullptr, bool no_update_timestamp=false, bool is_prefetch=false) {
-        Address vLineAddr = vAddr >> lineBits;
-        //L1 latency as returned by load() is zero, hence add accLat
-        uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc,lbr,no_update_timestamp,is_prefetch);
-        cRec->record(curCycle, dispatchCycle, respCycle);
-
-        //Support legacy prefetching flow for backwards compatibility
-        executePrefetch(curCycle, dispatchCycle, 0, cRec);
-
+        
         if(is_prefetch)
         {
-            //
+            Address vLineAddr = vAddr >> lineBits;
+            Address prefetchLineAddr = procMask | vLineAddr;
+            return issuePrefetch(prefetchLineAddr, 0/*prefetch into L1*/, curCycle, dispatchCycle, cRec, 0 /*No PC*/, false, no_update_timestamp);
         }
         else
         {
+            Address vLineAddr = vAddr >> lineBits;
+            uint64_t respCycle = FilterCache::load(vAddr, dispatchCycle, pc,lbr,no_update_timestamp,is_prefetch);
+            cRec->record(curCycle, dispatchCycle, respCycle);
+
+            //Support legacy prefetching flow for backwards compatibility
+            executePrefetch(curCycle, dispatchCycle, 0, cRec);
             for (uint32_t numLines = 1; numLines <= numLinesNLP; numLines++) {
                 Address pLineAddr = procMask | vLineAddr;
                 Address nextPLineAddr = pLineAddr + numLines;
                 issuePrefetch(nextPLineAddr, 0/*prefetch into L1*/, curCycle, dispatchCycle, cRec, 0 /*No PC*/, false);
             }
-        }
 #ifdef TRACE_BASED
-        //Access Dataflow Prefetcher
-        if (pref_degree) {
-            MESIState dummyState = MESIState::I;
-            MemReq req = {pc, vLineAddr, GETS, 1, &dummyState, dispatchCycle,
-                          NULL, dummyState, getSourceId(), 0};
-            dataflow_prefetcher->prefetch(req);
-        }
+            //Access Dataflow Prefetcher
+            if (pref_degree) {
+                MESIState dummyState = MESIState::I;
+                MemReq req = {pc, vLineAddr, GETS, 1, &dummyState, dispatchCycle,
+                            NULL, dummyState, getSourceId(), 0};
+                dataflow_prefetcher->prefetch(req);
+            }
 #endif
+            if (zeroLatencyCache) {
+                return dispatchCycle + accLat;
+            }
+            uint64_t prefetchBufferCycle;
+            if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
+            {
+                return MIN(respCycle,prefetchBufferCycle);
+            }
 
-        if (zeroLatencyCache) {
-            return dispatchCycle + accLat;
+            return respCycle;
         }
-        uint64_t prefetchBufferCycle;
-        if((prefetch_buffer!=nullptr) && prefetch_buffer->transfer(vLineAddr, prefetchBufferCycle))
-        {
-            return MIN(respCycle,prefetchBufferCycle);
-        }
-
-        return respCycle;
     }
 
     inline uint64_t store(Address vAddr, uint64_t curCycle,
@@ -267,7 +267,7 @@ public:
 
     uint64_t issuePrefetch(Address lineAddr, uint32_t skip, uint64_t curCycle,
                            uint64_t dispatchCycle, OOOCoreRecorder *cRec,
-                           uint64_t pc, bool isSW) {
+                           uint64_t pc, bool isSW, bool no_update_timestamp=false) {
         uint64_t respCycle;
         futex_lock(&filterLock);
         MESIState dummyState = MESIState::I;
@@ -278,6 +278,7 @@ public:
         MemReq req = {pc, lineAddr, GETS, 0, &dummyState,
                       dispatchCycle, &filterLock, dummyState, srcId,
                       flags, skip};
+        req.no_update_timestamp = no_update_timestamp;
         respCycle = access(req);
         cRec->record(curCycle, dispatchCycle, respCycle);
         futex_unlock(&filterLock);
