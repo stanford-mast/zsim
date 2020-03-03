@@ -50,6 +50,8 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     objStats->append(&profPrefLateMiss);
     profPrefLateTotalCycles.init("prefTotalLateCyc", "Total cycles lost waiting on late prefetches");
     objStats->append(&profPrefLateTotalCycles);
+    profPrefLateSavedCycles.init("profPrefLateSavedCycles", "Total cycles saved waiting on late prefetches");
+    objStats->append(&profPrefLateSavedCycles);
     profPrefSavedCycles.init("prefSavedCyc", "Total cycles saved by hitting a prefetched line (also if late)");
     objStats->append(&profPrefSavedCycles);
 
@@ -148,6 +150,7 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
                     profPrefLateMiss.inc();
                     profPrefLateTotalCycles.inc(*availCycle - req->cycle);
                     profPrefSavedCycles.inc(req->cycle - array[id].startCycle);
+                    profPrefLateSavedCycles.inc(req->cycle - array[id].startCycle);
                     if (isHWPrefetch(req)) {
                         profPrefHitPref.inc();
                     }

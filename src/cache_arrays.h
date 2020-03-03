@@ -101,6 +101,7 @@ class SetAssocArray : public CacheArray {
         Counter profPrefEarlyMiss;
         Counter profPrefLateMiss;
         Counter profPrefLateTotalCycles;
+        Counter profPrefLateSavedCycles;
         Counter profPrefSavedCycles;
         Counter profPrefInaccurateOOO;
         Counter profHitDelayCycles;
