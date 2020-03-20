@@ -539,7 +539,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             }
         }
     }*/
-    if(likely(last_eight_bbl_addrs.size()==32))
+    if(likely(last_eight_bbl_addrs.size()==8))
     {
         last_eight_bbl_addrs.pop_front();
     }
@@ -567,6 +567,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                 }
             }
         }
+        context.clear();
     }
 
     // If fetch rules, take into account delay between fetch and decode;
