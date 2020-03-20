@@ -509,36 +509,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             }
         }
     }
-
-    /*if(zinfo->enable_cs_iprefetch)
-    {
-        if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(bblAddr)!=zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
-        {
-            for(auto it: zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[bblAddr])
-            {
-                uint64_t predicate = it.first;
-                auto &tmp_list = it.second;
-                for(unsigned k=0;k<last_eight_bbl_addrs.size(); k++)
-                {
-                    if(last_eight_bbl_addrs[k]==predicate)
-                    {
-                        for(auto vec_it: tmp_list)
-                        {
-                            if(zinfo->iprefetch_buffer_size>0)
-                            {
-                                l1i->prefetch_into_buffer(vec_it, curCycle);
-                            }
-                            else
-                            {
-                                if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
-                                else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }*/
+    
     if(likely(last_eight_bbl_addrs.size()==8))
     {
         last_eight_bbl_addrs.pop_front();
@@ -552,17 +523,17 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
             context.push_back(last_eight_bbl_addrs[k-1]);
             if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(context)!=zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
             {
-                auto &tmp_list = zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context];
-                for(auto vec_it: tmp_list)
+                for(uint32_t tmp_index = 0; tmp_index < zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context].size(); tmp_index++)
                 {
+                    Address fetchAddr = zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context][tmp_index];
                     if(zinfo->iprefetch_buffer_size>0)
                     {
-                        l1i->prefetch_into_buffer(vec_it, curCycle);
+                        l1i->prefetch_into_buffer(fetchAddr, curCycle);
                     }
                     else
                     {
-                        if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
-                        else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
+                        if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                        else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
                     }
                 }
             }
