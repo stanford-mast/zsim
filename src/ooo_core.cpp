@@ -510,7 +510,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         }
     }
 
-    if(zinfo->enable_cs_iprefetch)
+    /*if(zinfo->enable_cs_iprefetch)
     {
         if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(bblAddr)!=zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
         {
@@ -538,12 +538,36 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                 }
             }
         }
-    }
-    if(likely(last_eight_bbl_addrs.size()==8))
+    }*/
+    if(likely(last_eight_bbl_addrs.size()==32))
     {
         last_eight_bbl_addrs.pop_front();
     }
-    last_eight_bbl_addrs.push_back(bblAddr); 
+    last_eight_bbl_addrs.push_back(bblAddr);
+    if(zinfo->enable_cs_iprefetch)
+    {
+        std::vector<uint64_t> context;
+        for(uint64_t k = last_eight_bbl_addrs.size(); k>0; k--)
+        {
+            context.push_back(last_eight_bbl_addrs[k-1]);
+            if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(context)!=zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
+            {
+                auto &tmp_list = zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context];
+                for(auto vec_it: tmp_list)
+                {
+                    if(zinfo->iprefetch_buffer_size>0)
+                    {
+                        l1i->prefetch_into_buffer(vec_it, curCycle);
+                    }
+                    else
+                    {
+                        if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                        else l1i->load(vec_it, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
+                    }
+                }
+            }
+        }
+    }
 
     // If fetch rules, take into account delay between fetch and decode;
     // If decode rules, different BBLs make the decoders skip a cycle

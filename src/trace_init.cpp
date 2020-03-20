@@ -1223,21 +1223,23 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         FILE *tmp_file = fopen(cs_iprefetch_info_file_name, "r");
         if(tmp_file!=NULL)
         {
-            uint64_t prefetch_candidate_predicate;
-            uint64_t prefetch_candidate_predecessor;
-            uint64_t missed_pc;
-            zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map = std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::vector<uint64_t>>>();
-            while(fscanf(tmp_file, "%" SCNu64 " %" SCNu64 " %" SCNu64 " ", &prefetch_candidate_predicate, &prefetch_candidate_predecessor, &missed_pc) != EOF)
+            zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map = std::unordered_map<std::vector<uint64_t>,std::vector<uint64_t>,container_hash>();
+            uint64_t context_size, tmp_u64, prefetch_list_size;
+            while(fscanf(tmp_file, "%" SCNu64 " ", &context_size) != EOF)
             {
-                if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(prefetch_candidate_predecessor)==zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
+                std::vector<uint64_t> context;
+                for(uint64_t k = 0; k<context_size; k++)
                 {
-                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor]=std::unordered_map<uint64_t,std::vector<uint64_t>>();
+                    if(fscanf(tmp_file, "%" SCNu64 " ",&tmp_u64)==EOF)panic("Error while reading context");
+                    context.push_back(tmp_u64);
                 }
-                if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor].find(prefetch_candidate_predicate)==zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor].end())
+                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context]=std::vector<uint64_t>();
+                if(fscanf(tmp_file, "%" SCNu64 " ",&prefetch_list_size)==EOF)panic("Error while reading context prefetch list size");
+                for(uint64_t k = 0; k<prefetch_list_size; k++)
                 {
-                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor][prefetch_candidate_predicate]=std::vector<uint64_t>();
+                    if(fscanf(tmp_file, "%" SCNu64 " ",&tmp_u64)==EOF)panic("Error while reading context");
+                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context].push_back(tmp_u64);
                 }
-                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[prefetch_candidate_predecessor][prefetch_candidate_predicate].push_back(missed_pc);
             }
             fclose(tmp_file);
             zinfo->enable_cs_iprefetch = true;
