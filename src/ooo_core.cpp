@@ -510,7 +510,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         }
     }
     
-    if(likely(last_eight_bbl_addrs.size()==8))
+    if(likely(last_eight_bbl_addrs.size()==32))
     {
         last_eight_bbl_addrs.pop_front();
     }
