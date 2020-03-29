@@ -44,8 +44,10 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     objStats->init("array", "Cache array stats");
     profPrefHit.init("prefHits", "Cache line hits that were previously prefetched");
     objStats->append(&profPrefHit);
-    profPrefEarlyMiss.init("prefEarlyMiss", "Prefetched cache lines that were never used or fetched too early so they were already evicted from the cache");
+    profPrefEarlyMiss.init("prefEarlyMiss", "Prefetched cache lines that were never used or fetched too early so they were already evicted from the cache before 400 cycles from startCycle");
     objStats->append(&profPrefEarlyMiss);
+    profPrefNeverUsed.init("prefNeverUsed", "Prefetched cache lines that were never used or fetched too early so they were already evicted from the cache after 400 cycles from startCycle");
+    objStats->append(&profPrefNeverUsed);
     profPrefLateMiss.init("prefLateMiss", "Prefetched cache lines that were fetched too late and were still in flight");
     objStats->append(&profPrefLateMiss);
     profPrefLateTotalCycles.init("prefTotalLateCyc", "Total cycles lost waiting on late prefetches");
@@ -237,7 +239,16 @@ void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32
     }
 
     if(array[candidate].prefetch) {
-        profPrefEarlyMiss.inc();
+
+        if(array[candidate].startCycle + 400 > req->cycle)
+        {
+            profPrefEarlyMiss.inc();
+        }
+        else
+        {
+            profPrefNeverUsed.inc();
+        }
+        
         if (isHWPrefetch(req)) {
             profPrefReplacePref.inc();
         }
