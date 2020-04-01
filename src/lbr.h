@@ -44,10 +44,12 @@ private:
     std::ofstream self_modifying_bbl_info_file;
     std::set<uint64_t> observed_bbls;
     std::unordered_map<uint64_t,std::set<uint32_t>> bbl_size_difference_check;
+    uint64_t current_bbl_index;
 public:
     LBR_Stack()
     {
         last_cycle = 0;
+        current_bbl_index = 0;
         _queue.clear();
     }
     void set_log_file(const char *path_name)
@@ -93,6 +95,7 @@ public:
             bbl_size_difference_check[bbl_address].insert(instrs);
             if(self_modifying_bbl_info_file.is_open())self_modifying_bbl_info_file<<bbl_address<<","<<instrs<<","<<bytes<<std::endl;
         }
+        current_bbl_index+=1;
     }
     std::string get_string()
     {
@@ -105,7 +108,7 @@ public:
     }
     void log_event(uint64_t pc,uint64_t miss_cl_address)
     {
-        if(log_file.is_open())log_file<<miss_cl_address<<","<<pc<<","<<get_string()<<std::endl;
+        if(log_file.is_open())log_file<<miss_cl_address<<","<<pc<<","<<get_string()<<","<<current_bbl_index-1<<std::endl;
     }
     ~LBR_Stack()
     {
