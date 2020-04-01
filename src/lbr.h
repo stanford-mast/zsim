@@ -108,7 +108,7 @@ public:
     }
     void log_event(uint64_t pc,uint64_t miss_cl_address)
     {
-        if(log_file.is_open())log_file<<miss_cl_address<<","<<pc<<","<<get_string()<<","<<current_bbl_index-1<<std::endl;
+        if(log_file.is_open())log_file<<miss_cl_address<<","<<pc<<","<<get_string()<<current_bbl_index-1<<std::endl;
     }
     ~LBR_Stack()
     {
