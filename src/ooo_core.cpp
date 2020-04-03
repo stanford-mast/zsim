@@ -533,6 +533,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                     }
                 }
             }
+            lbr_hash.clear();
         }
     }
     
