@@ -1239,7 +1239,15 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
                     context.insert(tmp_u64);
                 }
                 if(fscanf(tmp_file, "%" SCNu64 " ",&target)==EOF)panic("Error while reading context target");
-                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[candidate][target]=context;
+                if(context_size>0)zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[candidate][target]=context;
+                else
+                {
+                    if(zinfo->iprefetch_bbl_to_cl_address_map.find(candidate)==zinfo->iprefetch_bbl_to_cl_address_map.end())
+                    {
+                        zinfo->iprefetch_bbl_to_cl_address_map[candidate]=std::vector<uint64_t>();
+                    }
+                    zinfo->iprefetch_bbl_to_cl_address_map[candidate].push_back(target);
+                }
             }
             fclose(tmp_file);
             zinfo->enable_cs_iprefetch = true;
