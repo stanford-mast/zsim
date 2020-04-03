@@ -1223,23 +1223,23 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         FILE *tmp_file = fopen(cs_iprefetch_info_file_name, "r");
         if(tmp_file!=NULL)
         {
-            zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map = std::unordered_map<std::vector<uint64_t>,std::vector<uint64_t>,container_hash>();
-            uint64_t context_size, tmp_u64, prefetch_list_size;
-            while(fscanf(tmp_file, "%" SCNu64 " ", &context_size) != EOF)
+            zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map = std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::set<uint64_t>>>(); //std::unordered_map<std::vector<uint64_t>,std::vector<uint64_t>,container_hash>();
+            uint64_t candidate, context_size, tmp_u64, target;
+            while(fscanf(tmp_file, "%" SCNu64 " ", &candidate) != EOF)
             {
-                std::vector<uint64_t> context;
+                if(zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.find(candidate)==zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map.end())
+                {
+                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[candidate]=std::unordered_map<uint64_t,std::set<uint64_t>>();
+                }
+                std::set<uint64_t> context;
+                if(fscanf(tmp_file, "%" SCNu64 " ", &context_size) == EOF)panic("Error while reading context size");
                 for(uint64_t k = 0; k<context_size; k++)
                 {
                     if(fscanf(tmp_file, "%" SCNu64 " ",&tmp_u64)==EOF)panic("Error while reading context");
-                    context.push_back(tmp_u64);
+                    context.insert(tmp_u64);
                 }
-                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context]=std::vector<uint64_t>();
-                if(fscanf(tmp_file, "%" SCNu64 " ",&prefetch_list_size)==EOF)panic("Error while reading context prefetch list size");
-                for(uint64_t k = 0; k<prefetch_list_size; k++)
-                {
-                    if(fscanf(tmp_file, "%" SCNu64 " ",&tmp_u64)==EOF)panic("Error while reading context");
-                    zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[context].push_back(tmp_u64);
-                }
+                if(fscanf(tmp_file, "%" SCNu64 " ",&target)==EOF)panic("Error while reading context target");
+                zinfo->cs_iprefetch_bbl_to_predicate_to_cl_address_map[candidate][target]=context;
             }
             fclose(tmp_file);
             zinfo->enable_cs_iprefetch = true;

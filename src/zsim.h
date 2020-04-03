@@ -36,6 +36,7 @@
 #include <unordered_map>
 #include <map>
 #include <vector>
+#include <set>
 #include <boost/functional/hash.hpp>
 
 // XXX hack for prefetcher
@@ -211,8 +212,8 @@ struct GlobSimInfo {
 
     bool enable_cs_iprefetch;
 
-    //std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::vector<uint64_t>>> cs_iprefetch_bbl_to_predicate_to_cl_address_map;
-    std::unordered_map<std::vector<uint64_t>,std::vector<uint64_t>,container_hash> cs_iprefetch_bbl_to_predicate_to_cl_address_map;
+    std::unordered_map<uint64_t,std::unordered_map<uint64_t,std::set<uint64_t>>> cs_iprefetch_bbl_to_predicate_to_cl_address_map;
+    //std::unordered_map<std::vector<uint64_t>,std::vector<uint64_t>,container_hash> cs_iprefetch_bbl_to_predicate_to_cl_address_map;
 
     bool enable_code_bloat_effect;
     std::map<uint64_t,uint64_t> prev_to_new_bbl_address_map;
