@@ -222,6 +222,8 @@ struct GlobSimInfo {
     bool prefetch_has_lower_replacement_priority;
 
     uint64_t iprefetch_buffer_size;
+
+    uint64_t asmdb_next_line_count;
 };
 
 

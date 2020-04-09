@@ -505,6 +505,16 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                 {
                     if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
                     else l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
+                    if(zinfo->asmdb_next_line_count > 0)
+                    {
+                        Address nextLine = fetchAddr;
+                        for(uint64_t i = 1; i <=zinfo->asmdb_next_line_count; i++)
+                        {
+                            nextLine += lineSize;
+                            if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(nextLine, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                            else l1i->load(nextLine, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
+                        }
+                    }
                 }
             }
         }

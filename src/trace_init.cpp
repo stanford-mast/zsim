@@ -1145,6 +1145,8 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     
     zinfo->is_first_pass = config.get<bool>("sim.is_first_pass", true);
     zinfo->prefetch_has_lower_replacement_priority = config.get<bool>("sim.prefetch_has_lower_replacement_priority", false);
+
+    zinfo->asmdb_next_line_count = config.get<uint64_t>("sim.asmdb_next_line_count", 0);
     
     zinfo->enable_iprefetch = config.get<bool>("sim.enable_iprefetch", false);
     if(zinfo->enable_iprefetch)
