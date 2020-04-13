@@ -479,6 +479,7 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
     // Simulate current bbl ifetch
     Address endAddr = bblAddr + bblInfo->bytes;
+    Address last_missed_addr = bblAddr;
     uint32_t last_fetch_latency = l1i->getAccLat();
     for (Address fetchAddr = bblAddr; fetchAddr < endAddr; fetchAddr += lineSize) {
         // The Nehalem frontend fetches instructions in 16-byte-wide accesses.
@@ -490,11 +491,12 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
         else fetchLat = l1i->load(fetchAddr, curCycle, curCycle, bblAddr, &cRec) - curCycle;
         fetchCycle += fetchLat;
         last_fetch_latency = fetchLat;
+        last_missed_addr = fetchAddr;
     }
 
     if(last_fetch_latency > l1i->getAccLat() && zinfo->asmdb_next_line_count > 0)
     {
-        Address nextLine = endAddr-1;
+        Address nextLine = last_missed_addr;
         for(uint64_t i = 1; i <=zinfo->asmdb_next_line_count; i++)
         {
             nextLine += lineSize;
