@@ -224,6 +224,7 @@ struct GlobSimInfo {
     uint64_t iprefetch_buffer_size;
 
     uint64_t asmdb_next_line_count;
+    uint64_t cs_prefetch_false_positive_rate;
 };
 
 

@@ -1219,6 +1219,8 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
         }
     }
 
+    zinfo->cs_prefetch_false_positive_rate = config.get<uint64_t>("sim.cs_prefetch_false_positive_rate", 13);
+
     const char* cs_iprefetch_info_file_name = realpath(config.get<const char*>("sim.cs_iprefetch_bbl_to_cl_address_map", nullptr), nullptr);
     if(cs_iprefetch_info_file_name!=nullptr)
     {

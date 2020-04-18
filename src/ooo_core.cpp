@@ -529,6 +529,15 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
                         else l1i->load(target, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
                     }
                 }
+                else if(zinfo->cs_prefetch_false_positive_rate > 0)
+                {
+                    uint64_t lottery = rand() % 100;
+                    if(lottery < zinfo->cs_prefetch_false_positive_rate)
+                    {
+                        if(zinfo->prefetch_has_lower_replacement_priority)l1i->load(target, curCycle, curCycle, bblAddr, &cRec, nullptr, true, true);
+                        else l1i->load(target, curCycle, curCycle, bblAddr, &cRec, nullptr, false, true);
+                    }
+                }
             }
             lbr_hash.clear();
         }
