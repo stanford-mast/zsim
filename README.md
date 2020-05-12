@@ -51,7 +51,7 @@ Now run your first pt simulation
 time build/opt/zsim_trace tests/clang.cfg
 ```
 
-Let me (takh@umich.edu) know if you face any problem.
+Let me (takh AT umich.edu) know if you face any problem.
 
 
 TODO
