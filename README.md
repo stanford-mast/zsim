@@ -1,3 +1,65 @@
+zsim-pt
+=======
+
+zsim-pt introduces a new frontend to zsim to simulate instruction traces from intel-pt
+(processor trace) format.
+The current version only simulates the front-end since intel processor trace does not
+include memory access trace. We have future plan to simulate backend following two mechanisms.
+Please see the TODO below if you are interested about out backend simulation plan.
+
+Dependencies:
+- Linux perf to collect intel-pt trace
+```
+full_version=$(uname -r)
+flavour_abi=${full_version#*-}
+flavour=${flavour_abi#*-}
+version=${full_version%-$flavour}
+sudo apt-get install linux-tools-common linux-tools-${version} linux-cloud-tools-${version}
+```
+- Boost library: `sudo apt-get install libboost-all-dev`
+- zlib library: `sudo apt-get install zlib1g-dev`
+- XED: clone and build the library from https://github.com/intelxed/xed
+(memtrace dependency)
+- DynamoRIO: clone and build from: https://github.com/DynamoRIO/dynamorio
+  (The recent version may not be compatible with zsim, go to commit, `ad03a4ac7517b8cc3f21a2aa6e68b1a52cae74e4`)
+  `git checkout ad03a4ac7517b8cc3f21a2aa6e68b1a52cae74e4`
+(zsim dependency)
+- `gcc >=4.6, pin, scons, libconfig, libhdf5, libelfg0`
+  
+
+If you want to build the simulator, please modify source.sh with your installation of PIN, XED, and DynamoRIO.
+Then run the following two commands, you should be good to go:
+
+```
+source source.sh
+scons -j $(grep -c ^processor /proc/cpuinfo)
+```
+
+Collect the intel-pt using perf for your workload:
+
+```
+cd tests
+# Next command took 5 minutes on my machine
+time bash pt-collect.sh # This collects profile from a clang run therefore requires clang
+# Now it has created the tests/clang.cfg
+cd ..
+```
+
+Now run your first pt simulation
+
+```
+time build/opt/zsim_trace tests/clang.cfg
+```
+
+Let me (takh@umich.edu) know if you face any problem.
+
+
+TODO
+====
+1. `perf stat` based cache miss simulation for backend
+2. `pt-write` driven instrumentation based backend simulation
+3. Remove DynamoRIO dependency from zsim-pt
+
 zsim_trace
 =========
 
