@@ -1,5 +1,6 @@
 /** $lic$
- * Copyright (C) 2020 by University of Michigan (implemented by Tanvir Ahmed Khan and Jeremiah Dunne)
+ * Copyright (C) 2020 by University of Michigan (implemented by Tanvir Ahmed Khan
+ * and Jeremiah Dunne)
  *
  * This file is part of zsim-pt.
  *
