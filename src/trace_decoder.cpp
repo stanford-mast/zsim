@@ -53,7 +53,6 @@ void DynUop::clear() {
 
 Decoder::Instr::Instr(const INS _ins, uint64_t _pc) : ins(_ins), pc(_pc), numLoads(0), numInRegs(0), numOutRegs(0), numStores(0) {
     uint32_t numOperands = INS_OperandCount(_ins);
-    xed_category_enum_t category = (xed_category_enum_t) INS_Category(_ins);
     xed_iclass_enum_t opcode = (xed_iclass_enum_t) INS_Opcode(_ins);
 
     for (uint32_t op = 0; op < numOperands; op++) {
@@ -104,12 +103,8 @@ Decoder::Instr::Instr(const INS _ins, uint64_t _pc) : ins(_ins), pc(_pc), numLoa
             assert(reg);  // can't be invalid
             reg = REG_FullRegName(reg);  // eax -> rax, etc; o/w we'd miss a bunch of deps!
 
-            /* Handle XED-PIN mismatch
-            * PIN lists one memory op and one register of which sounds reasonable for POP
-            * and zsim can only handle one+one. XED lists two reg ops (which might be correct)
-            * but it won't affect accuracy much.*/
-            if (read && category != XC(POP)) inRegs[numInRegs++] = reg;
-            if (write && category != XC(PUSH)) outRegs[numOutRegs++] = reg;
+            if (read) inRegs[numInRegs++] = reg;
+            if (write) outRegs[numOutRegs++] = reg;
         }
         else if (xed_operand_name(o) == XED_OPERAND_MEM0) {
             if (write) storeOps[numStores++] = 0;
@@ -439,17 +434,11 @@ void Decoder::emitBasicOp(Instr& instr, DynUopVec& uops, uint32_t lat, uint8_t p
     // TODO(granta): Fully implement these instructions. If they are common
     // simulation results will suffer.
     if (instr.numInRegs > 2) {
-      if (reportUnhandled) {
-        warn("Too many input registers for opcode %s", xed_iclass_enum_t2str(INS_Opcode(instr.ins)));
-      }
-      instr.numInRegs = 2;
+      instr.numInRegs = 2 - instr.numLoads;
       srcs = instr.numLoads + instr.numInRegs;
     }
     if (instr.numOutRegs > 2) {
-      if (reportUnhandled) {
-        warn("Too many output registers for opcode %s", xed_iclass_enum_t2str(INS_Opcode(instr.ins)));
-      }
-      instr.numOutRegs = 2;
+      instr.numOutRegs = 2 - instr.numOutRegs;
       dsts = instr.numStores + instr.numOutRegs;
     }
 
