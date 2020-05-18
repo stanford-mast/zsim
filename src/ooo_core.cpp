@@ -397,9 +397,8 @@ inline void OOOCore::bbl(Address bblAddr, BblInfo* bblInfo) {
 
     // Check full match between expected and actual mem ops
     // If these assertions fail, most likely, something's off in the decoder
-    //Disabling this load and store assertion as PT does not have backend load and store address
-    //assert_msg(loadIdx == loads, "%s: loadIdx(%d) != loads (%d)", name.c_str(), loadIdx, loads);
-    //assert_msg(storeIdx == stores, "%s: storeIdx(%d) != stores (%d)", name.c_str(), storeIdx, stores);
+    assert_msg(loadIdx == loads, "%s: loadIdx(%d) != loads (%d)", name.c_str(), loadIdx, loads);
+    assert_msg(storeIdx == stores, "%s: storeIdx(%d) != stores (%d)", name.c_str(), storeIdx, stores);
     loads = stores = 0;
 
 
