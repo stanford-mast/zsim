@@ -11,8 +11,7 @@ TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
     : TraceReader(_trace, _binary, _offset, _bufsize),  mt_iter_(nullptr),
       mt_end_(nullptr), mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
   mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
-  traceFileIs(_trace);
-  init();
+  init(_trace);
 }
 
 // Trace + multiple binaries
@@ -23,8 +22,7 @@ TraceReaderMemtrace::TraceReaderMemtrace(const std::string &_trace,
       mt_end_(nullptr), mt_state_(MTState::INST), mt_mem_ops_(0), mt_seq_(0),
   mt_prior_isize_(0), mt_using_info_a_(true), mt_warn_target_(0) {
   binaryGroupPathIs(_binary_group_path);
-  traceFileIs(_trace);
-  init();
+  init(_trace);
 }
 
 TraceReaderMemtrace::~TraceReaderMemtrace() {
@@ -34,12 +32,12 @@ TraceReaderMemtrace::~TraceReaderMemtrace() {
   }
 }
 
-void TraceReaderMemtrace::init() {
+void TraceReaderMemtrace::init(const std::string &_trace) {
     mt_info_a_.custom_op = CustomOp::NONE;
     mt_info_b_.custom_op = CustomOp::NONE;
     mt_info_a_.valid = true;
     mt_info_b_.valid = true;
-    TraceReader::init();
+    TraceReader::init(_trace);
 }
 
 //TODO: Detect memtrace/module.log type dynamically

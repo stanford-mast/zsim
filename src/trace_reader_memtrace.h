@@ -3,9 +3,10 @@
 
 #include "trace_reader.h"
 
+//#include "instrument.h"
 #include "analyzer.h"
-#include "raw2trace.h"
 #include "raw2trace_directory.h"
+#include "raw2trace.h"
 
 class TraceReaderMemtrace : public TraceReader {
   public:
@@ -20,7 +21,7 @@ class TraceReaderMemtrace : public TraceReader {
     void binaryGroupPathIs(const std::string &_path) override;
     bool initTrace() override;
     bool locationForVAddr(uint64_t _vaddr, uint8_t **_loc, uint64_t *_size) override;
-    void init();
+    void init(const std::string &_trace);
     static const char *parse_buildid_string(const char *src, OUT void **data);
     bool getNextInstruction__(InstInfo *_info, InstInfo *_prior);
     void processInst(InstInfo *_info);

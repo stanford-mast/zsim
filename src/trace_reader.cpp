@@ -27,7 +27,7 @@ static std::mutex initMutex;
 // A non-reader
 TraceReader::TraceReader()
     : trace_ready_(false), binary_ready_(false), skipped_(0) {
-  init();
+  init("");
 }
 
 // Trace + single binary
@@ -58,7 +58,7 @@ bool TraceReader::operator!() {
   return !(trace_ready_ && binary_ready_);
 }
 
-void TraceReader::init() {
+void TraceReader::init(const std::string &_trace) {
   // Initialize XED only once
   initMutex.lock();
   if (!xedInitDone) {
@@ -85,6 +85,8 @@ void TraceReader::init() {
   invalid_info_.unknown_type = false;
   invalid_info_.valid = false;
 
+  if(_trace.size())
+    traceFileIs(_trace);
   init_buffer();
 }
 

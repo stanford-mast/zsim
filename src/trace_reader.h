@@ -130,7 +130,7 @@ class TraceReader {
   uint32_t buf_size_;
   std::deque <InstInfo> ins_buffer;
 
-  void init();
+  void init(const std::string &_trace);
   bool initBinary(const std::string &_name, uint64_t _offset);
   void clearBinaries();
   void fillCache(uint64_t _vAddr, uint8_t _reported_size, uint8_t *inst_bytes=NULL);
