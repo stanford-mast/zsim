@@ -21,9 +21,6 @@
  */
 
 #include "best_offset_prefetcher.h"
-#define L3_ACCESS_TIME 49
-//#define L3_ACCESS_TIME 27
-//#define L3_ACCESS_TIME 30
 
 // helper to reset offset scores to 0
 void BestOffsetPrefetcher::reset_offsets(){
@@ -175,9 +172,6 @@ uint64_t BestOffsetPrefetcher::access(MemReq& _req) {
         return resp_cycle;  //Ignore other requests
     } 
 
-#ifdef SIMPLE_PC
-    if (_req.pc == 140577589630834){
-#endif
     // if not an instruction fetch, monitored, or a speculative request
     //      execute a prefetch
     // need to figure out if the response cycle is going to DRAM or not
@@ -192,9 +186,6 @@ uint64_t BestOffsetPrefetcher::access(MemReq& _req) {
         // run the learning algo with the current cycle in mind
         learn(req.lineAddr, req.cycle);
     }
-#ifdef SIMPLE_PC
-    }
-#endif
     return resp_cycle;
 }
 

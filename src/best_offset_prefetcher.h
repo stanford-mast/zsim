@@ -20,8 +20,6 @@
  * You should have received a copy of the GNU General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-//#define TEST
-//#define SIMPLE_PC
 
 #ifndef BEST_OFFSET_PREFETCHER_H_
 #define BEST_OFFSET_PREFETCHER_H_
@@ -42,14 +40,12 @@
 #include <cmath> 
 #endif
 
+const uint64_t L3_ACCESS_TIME = 49;
 // num run throughs to make before round over
 const uint64_t RND_MAX = 100;
-//const uint64_t RND_MAX = 50;
 // max score before round ended
 ///const uint64_t MAX_SCORE = 10;
 const uint64_t MAX_SCORE = 31;
-// score to signal to turn off prefetcher
-//const uint64_t BAD_SCORE = 5;
 const uint64_t BAD_SCORE = 1;
 // offset to start prefetching with
 const uint64_t INIT_OFFSET = 1;
