@@ -53,6 +53,7 @@
 #include "mem_ctrls.h"
 #include "network.h"
 #include "next_line_prefetcher.h"
+#include "best_offset_prefetcher.h"
 #include "null_core.h"
 #include "ooo_core.h"
 #include "part_repl_policies.h"
@@ -483,6 +484,27 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                 ss << name << '-' << i;
                 g_string full_name(ss.str().c_str());
                 cg[i].emplace_back(new NextLinePrefetcher(full_name,
+                                                          target_cache,
+                                                          monitor_loads,
+                                                          monitor_stores,
+                                                          degree));
+            }
+            return cgp;
+        } else if (prefetch_type.compare("BO") == 0) {
+            bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
+            bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 0);
+            g_string target_cache = config.get<const char*>(prefix + "target", "");
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            if (target_cache.empty()) {
+                panic("Unspecified target cache for prefetcher '%s'", name.c_str());
+            }
+            cg.resize(prefetchers);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << '-' << i;
+                g_string full_name(ss.str().c_str());
+                cg[i].emplace_back(new BestOffsetPrefetcher(full_name,
                                                           target_cache,
                                                           monitor_loads,
                                                           monitor_stores,
