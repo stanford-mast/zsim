@@ -24,7 +24,6 @@
 #ifndef BEST_OFFSET_PREFETCHER_H_
 #define BEST_OFFSET_PREFETCHER_H_
 
-#ifndef TEST 
 #include "cache_prefetcher.h"
 #include "filter_cache.h"
 #include "g_std/g_string.h"
@@ -32,19 +31,11 @@
 #include "stats.h" 
 #include "hash.h"
 // hopefully don't need to include this for tests in the .cpp
-#else 
-#include <map>
-#include <vector>
-#include <iostream>
-#include <cmath> 
-#include <cmath> 
-#endif
 
 const uint64_t L3_ACCESS_TIME = 49;
 // num run throughs to make before round over
 const uint64_t RND_MAX = 100;
 // max score before round ended
-///const uint64_t MAX_SCORE = 10;
 const uint64_t MAX_SCORE = 31;
 const uint64_t BAD_SCORE = 1;
 // offset to start prefetching with
@@ -109,9 +100,7 @@ private:
     uint64_t current_round;
     uint64_t test_offset_index;
     uint64_t current_offset;
-#ifndef TEST
     Counter prof_emitted_prefetches_;
-#endif 
 };
 
 #endif

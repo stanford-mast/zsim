@@ -17,10 +17,31 @@
  * details.
  *
  * You should have received a copy of the GNU General Public License along with
- * this program. If not, see <http://www.gnu.org/licenses/>.
+ * this program. If not, see <http://www.gnu.org/licenses/>.  
+
  */
 
 #include "best_offset_prefetcher.h"
+
+/*
+The Best Offset Prefetcher is a prefetching algorithm proposed in the paper 
+Best Offset Hardware Prefetching written by Pierre Michaud. It is a non-PC 
+based prefetching algorithm that propes offsets from an access address
+and selects an offset that generates the most timely prefetches. The prefetcher
+monitors L2 misses and prefetches into the L3 cache.
+
+A brief API level description: an access comes in (access function), and the amount
+time of until that prefetch is ready is calculated based on the expected time until the access will
+make it to the cache. If the time for the prefetch is greater than the L3 access time
+(signalling that the access is going to DRAM rather than the L3 cache), then one of the 
+offsets within the page (0-63) is tested to see if a prefetch to a previous access + that
+test offset would have generated a timely prefetch. If so, then the "score" associated with 
+that offset is increased. When an offset's "score" approaches the maximum value or 
+all of the offsets have been gone through, the offset with the highest score is used to 
+prefetch from all the accesses that come in. All future accesses are prefetched with that
+offset from that point onwards, hopefully generating timely prefetches, and the next round of 
+learning begins.
+*/
 
 // helper to reset offset scores to 0
 void BestOffsetPrefetcher::reset_offsets(){
@@ -29,7 +50,7 @@ void BestOffsetPrefetcher::reset_offsets(){
     } 
 }
 void BestOffsetPrefetcher::print_scores(){
-    std::cout << std::endl;
+    // line break to distinguish between the last print
     std::cout << std::endl;
     for (auto& i : offset_scores){
         if (i.second != 0)
@@ -65,8 +86,7 @@ void BestOffsetPrefetcher::move_test_offset_ptr(){
         // reset the pointer and set the round up
         this->test_offset_index = 0;
         this->current_round++;
-    // if max out the nuber of rounds, 
-        // reset the prefetcher
+    // if max out the nuber of rounds, reset the prefetcher
          if (this->current_round == ( RND_MAX + 1 ) ){
             this->current_offset = find_max_score(); 
             reset_prefetcher();
@@ -85,12 +105,7 @@ void BestOffsetPrefetcher::learn(uint64_t addr, uint64_t cycle){
     // if we're going off the page, dont' get it
     uint64_t base_addr = addr - test_offset;
     // if we're going off the page, dont' get it
-    if ( ((addr - test_offset) < 0 )
-        or
-        (
-        // if trying to check on another page, don't do it
-        (addr & PAGE_MASK) != ((base_addr) & PAGE_MASK)
-        )){
+    if ( ((addr - test_offset) < 0 ) || ( (addr & PAGE_MASK) != ((base_addr) & PAGE_MASK))){
         // move this offset along
         move_test_offset_ptr();
         return;
@@ -121,7 +136,10 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
                                        bool _monitor_GETS, bool _monitor_GETX,
                                        uint32_t _degree):
     CachePrefetcher(_name, _target),  monitor_GETS_(_monitor_GETS),
-    monitor_GETX_(_monitor_GETX), degree_(_degree) {
+    monitor_GETX_(_monitor_GETX), degree_(1) {
+    if (_degree != 1) {
+        std::cout << "Ignoring degree parameter, using default degree of 1" <<std::endl;
+    }
     // init recent requests hash table
     this->recent_requests = RR();
     this->offset_scores = std::vector<std::pair<const uint64_t, uint64_t>>();
