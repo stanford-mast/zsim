@@ -53,6 +53,7 @@
 #include "mem_ctrls.h"
 #include "network.h"
 #include "next_line_prefetcher.h"
+#include "best_offset_prefetcher.h"
 #include "null_core.h"
 #include "ooo_core.h"
 #include "part_repl_policies.h"
@@ -488,6 +489,37 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                                                           monitor_stores,
                                                           degree));
             }
+            return cgp;
+        } else if (prefetch_type == "BO"){
+            //std::cout << "Prefix: " << prefix << std::endl;
+            bool monitor_loads = config.get<bool>(prefix + "monitorLoads", true);  //really 'GETS'
+            bool monitor_stores = config.get<bool>(prefix + "monitorStores", true);  //really 'GETX'
+            uint32_t degree = config.get<uint32_t>(prefix + "degree", 0);
+            g_string target_cache = config.get<const char*>(prefix + "target", "");
+            uint32_t prefetchers = config.get<uint32_t>(prefix + "prefetchers", 1);
+            uint64_t round_max = config.get<uint32_t>(prefix + "round_max", 100);
+            uint64_t max_score = config.get<uint32_t>(prefix + "max_score", 31);
+            uint64_t init_offset = config.get<uint32_t>(prefix + "init_offset", 1);
+            g_string target_prefix = "sys.caches." + target_cache + ".latency";
+            uint64_t target_latency = config.get<uint32_t>(target_prefix.c_str()); 
+            if (target_cache.empty()) {
+                panic("Unspecified target cache for prefetcher '%s'", name.c_str());
+            }
+            cg.resize(prefetchers);
+            for (uint32_t i = 0; i < prefetchers; i++) {
+                stringstream ss;
+                ss << name << '-' << i;
+                g_string full_name(ss.str().c_str());
+                cg[i].emplace_back(new BestOffsetPrefetcher(full_name,
+                    target_cache,
+                    monitor_loads,
+                    monitor_stores,
+                    degree,
+                    round_max,
+                    max_score,   
+                    init_offset,
+                    target_latency    
+                )); }
             return cgp;
         } else {
             panic("Unknown prefetcher type '%s'", prefetch_type.c_str());
