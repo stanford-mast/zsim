@@ -28,6 +28,7 @@ traceSrcs = [
     "monitor.cpp",
     "network.cpp",
     "next_line_prefetcher.cpp",
+    "best_offset_prefetcher.cpp",
     "null_core.cpp",
     "ooo_core.cpp",
     "ooo_core_recorder.cpp",
