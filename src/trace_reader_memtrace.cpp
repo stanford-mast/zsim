@@ -76,7 +76,7 @@ void TraceReaderMemtrace::binaryGroupPathIs(const std::string &_path) {
                   error.c_str());
             return;
         }
-        module_mapper_ = module_mapper_t::create(directory_.modfile_bytes_,
+        module_mapper_ = module_mapper_t::create(directory_.modfile_bytes,
 #ifdef ZSIM_USE_YT
 						 parse_buildid_string,
 #else
