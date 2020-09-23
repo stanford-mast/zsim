@@ -37,8 +37,10 @@ as well as the recent requests table implemenation.
 #include "stats.h" 
 #include "hash.h"
 
+#define SLIDING
+
 // global constants. Note that these are either not configurable or should not be changed.
-const uint64_t coherency_time = 22;
+const uint64_t coherency_time = 18; 
 const uint64_t num_offsets = 63;
 const uint64_t page_size = pow(2, 12);
 const uint64_t page_mask = 0xFFFFFFFFFFFFFFFF - page_size + 1;
@@ -48,6 +50,7 @@ class RR {
     public:
         RR(); 
         void insert(uint64_t _addr, uint64_t _cycle);
+        void clear();
         bool exists(uint64_t _addr, uint64_t _cycle);
         uint64_t size_ = 0;
         uint64_t max_size_;
@@ -66,7 +69,8 @@ public:
                                 uint64_t _round_max,
                                 uint64_t _max_score,
                                 uint64_t _init_offset,
-                                uint64_t _target_latency_ 
+                                uint64_t _target_latency_ ,
+                                uint64_t rr_size
                                 );
     void initStats(AggregateStat* _parentStat) override;
     uint64_t access(MemReq& _req) override;

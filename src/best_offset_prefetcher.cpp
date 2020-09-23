@@ -72,6 +72,7 @@ void BestOffsetPrefetcher::printScores(){
 // function to reset the prefetcher, updating stats, resetting rounds and offsets
 void BestOffsetPrefetcher::resetPrefetcher(){
     // compute a moving average of the amount of rounds per phase
+    //printScores();
     average_rounds__ += current_round_ / (++total_phases_);
     // set the counter value
     average_rounds_.set(average_rounds__);
@@ -81,6 +82,9 @@ void BestOffsetPrefetcher::resetPrefetcher(){
     this->current_round_ = 0;
     // set the test offset back to the end index (for timely prefetches)
     this->test_offset_index_ = 0;
+    // the version to clear all history versus hang onto the history from before
+    //this->recent_requests_.clear();
+    //std::cout << "New offset: " << this->current_offset_ << std::endl;
 }
 
 // function to fin the most successful offset of the last learning round
@@ -94,7 +98,7 @@ uint64_t BestOffsetPrefetcher::findMaxScore(){
             max_score_.first = s.first;
             // set the second to the score
             max_score_.second = s.second; 
-        } 
+        }
     }
     // return the highest scoring offset in the list
     return max_score_.first; 
@@ -109,6 +113,7 @@ void BestOffsetPrefetcher::moveTestOffsetPtr(){
         this->current_round_++;
          // if max out the nuber of rounds, reset the prefetcher
          if (this->current_round_ == ( this->round_max_ + uint64_t(1) ) ){
+            //std::cout << "Current round reset on max round: " << this->current_round_ << std::endl;
             this->current_offset_ = findMaxScore(); 
             resetPrefetcher();
         }
@@ -133,12 +138,14 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
 
     // check if address in the recent requests table if on current page
     if (this->recent_requests_.exists(base_addr, _cycle) == true){
+        //std::cout << "Finding base" << std::endl;
         // increase the statistic for the number of recent request hits
         recent_requests_hits_.inc();
         // if increasing that index by 1 would put us over the max score reset the prefetcher
         if (this->offset_scores_[this->test_offset_index_].second == (this->max_score_ - uint64_t(1))){
             // function to print scores at the end of the the round. useful for debugging
             //printScores();
+            //std::cout << "Current round reset on max score: " << this->current_round_ << std::endl;
             // increase the score for that offset
             this->current_offset_ = this->offset_scores_[this->test_offset_index_].first;
             // start a new learning phase with that new offset used for prefetching
@@ -161,7 +168,8 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
                                        uint64_t _round_max,
                                        uint64_t _max_score,
                                        uint64_t _init_offset,
-                                       uint64_t _target_latency
+                                       uint64_t _target_latency,
+                                       uint64_t rr_size
                                        ):
     CachePrefetcher(_name, _target),  monitor_GETS_(_monitor_GETS),
     monitor_GETX_(_monitor_GETX), degree_(1), round_max_(_round_max),
@@ -173,9 +181,9 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
         std::cout << "Ignoring degree parameter, using default degree of 1" <<std::endl;
     }
     // init recent requests hash table
-    uint64_t computed_max_size = num_offsets * round_max_;
+    //uint64_t computed_max_size = num_offsets * round_max_;
     this->recent_requests_ = RR();
-    this->recent_requests_.max_size_ = computed_max_size;
+    this->recent_requests_.max_size_ = rr_size;
     this->offset_scores_ = std::vector<std::pair<const uint64_t, uint64_t>>();
     // load up the offset scores table with the offset and score
     for (uint64_t i = 1; i <= num_offsets; ++i){ 
@@ -253,6 +261,7 @@ void BestOffsetPrefetcher::prefetch(MemReq& _req) {
 }
 // function to insert an address into the recent requests table
 void RR::insert(uint64_t _addr, uint64_t _cycle){
+#ifdef SLIDING
     // to handle deleting
     if (this->list.size() == max_size_){
         this->deletion(); 
@@ -272,10 +281,22 @@ void RR::insert(uint64_t _addr, uint64_t _cycle){
     }
     // increase the size of the list
     this->size_++;
+#else
+    uint64_t mapSlot = _addr % max_size_;
+    //std::cout << "Map slot on insert: " << mapSlot << std::endl;
+    if (this->hash.find(mapSlot) != this->hash.end()){
+        this->hash.erase(mapSlot); 
+        this->size_--;
+    }
+    auto new_pair = std::make_pair(mapSlot, std::pair<uint64_t, uint64_t>(_addr, _cycle));
+    this->hash.insert(new_pair); 
+    this->size_++;
+#endif
 }
 
 // check if an address exists in the recent requests table
 bool RR::exists(uint64_t _addr, uint64_t _cycle){
+#ifdef SLIDING
     auto found = this->hash.find(_addr); 
     if (found != this->hash.end()){
         // make sure the completion cycle for the request is less than the current one
@@ -285,10 +306,30 @@ bool RR::exists(uint64_t _addr, uint64_t _cycle){
         }
     }
    return false;
+#else
+    uint64_t mapSlot = _addr % max_size_;
+    //std::cout << "Map slot on exists: " << mapSlot << std::endl;
+    auto found = this->hash.find(mapSlot); 
+    if (found != this->hash.end()){
+//        std::cout << "Map slot exists" << std::endl;
+//        std::cout << "Address in map: " << found->second.first << std::endl;
+//        std::cout << "Address looking for: " << _addr << std::endl;
+        // make sure the stored address is the same querying for
+        if (found->second.first != _addr){
+            return false;
+        }
+        uint64_t completion = found->second.second;
+        if (completion <= _cycle){
+            return true;
+        }   
+    } 
+    return false;
+#endif
 }
 
 // function to delete the front of the recent requests table
 void RR::deletion(){
+#ifdef SLIDING
     // get the front of the list (thing to delete)
     std::pair<uint64_t, uint64_t> front = list.front();
     // find the corresponding address in the hash map
@@ -304,12 +345,28 @@ void RR::deletion(){
         list.pop_front(); 
     }
     this->size_--;
+#else
+
+#endif
+}
+
+void RR::clear(){
+#ifdef SLIDING
+    this->hash.clear();
+    this->list.clear();
+    this->size_ = 0; 
+#else 
+#endif
 }
 
 // init function for the recent requests table
 RR::RR()
     {
+#ifdef SLIDING
     this->hash = std::map<uint64_t, std::pair<uint64_t, uint64_t>>();
     this->list = std::deque<std::pair<uint64_t,uint64_t>>(); 
+#else
+    this->hash = std::map<uint64_t, std::pair<uint64_t, uint64_t>>(); 
+#endif
 }
 

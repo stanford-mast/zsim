@@ -575,6 +575,7 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
             uint64_t round_max = config.get<uint32_t>(prefix + "round_max", 100);
             uint64_t max_score = config.get<uint32_t>(prefix + "max_score", 31);
             uint64_t init_offset = config.get<uint32_t>(prefix + "init_offset", 1);
+            uint64_t rr_size = config.get<uint32_t>(prefix + "rr_size", 512);
             g_string target_prefix = "sys.caches." + target_cache + ".latency";
             uint64_t target_latency = config.get<uint32_t>(target_prefix.c_str()); 
             if (target_cache.empty()) {
@@ -593,7 +594,8 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
                     round_max,
                     max_score,   
                     init_offset,
-                    target_latency 
+                    target_latency,
+                    rr_size
                 )); }
             return cgp;
         } else {
