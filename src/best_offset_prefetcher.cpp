@@ -73,9 +73,17 @@ void BestOffsetPrefetcher::printScores(){
 void BestOffsetPrefetcher::resetPrefetcher(){
     // compute a moving average of the amount of rounds per phase
     //printScores();
-    average_rounds__ += current_round_ / (++total_phases_);
+    //average_rounds__ = (current_round_ + total_rounds_) / (++total_phases_);
+    total_phases_++;
+    //average_rounds__ = (total_rounds_) / (total_phases_);
+    //average_rounds_.set(average_rounds__);
+    average_rounds_.set(total_rounds_ / total_phases_);
+    average_hits_per_round_.set(recent_requests_hits_.get() / total_phases_);
+    //std::cout << "Total phases: " << total_phases_ << std::endl;
+    //std::cout << "Current round: " << current_round_ << std::endl;
+    //std::cout << "Average rounds: " << average_rounds_ << std::endl;
     // set the counter value
-    average_rounds_.set(average_rounds__);
+    average_max_score_.set(high_score_total_ / total_phases_);
     // return all offsets to 0
     resetOffsets();
     // set current round back to 0
@@ -100,6 +108,13 @@ uint64_t BestOffsetPrefetcher::findMaxScore(){
             max_score_.second = s.second; 
         }
     }
+    // set the max score stat
+    if (max_score_.second > all_time_max_score_.get()){
+        all_time_max_score_.set(max_score_.second); 
+        all_time_max_score_offset_.set(max_score_.first); 
+    }
+    // set the max average score
+    high_score_total_ += max_score_.second;
     // return the highest scoring offset in the list
     return max_score_.first; 
 }
@@ -109,13 +124,15 @@ void BestOffsetPrefetcher::moveTestOffsetPtr(){
     // if the current offset is the total minus 1
     if (this->test_offset_index_ == (num_offsets - 1) ){
         // reset the pointer and set the round up
-        this->test_offset_index_ = 0;
-        this->current_round_++;
          // if max out the nuber of rounds, reset the prefetcher
-         if (this->current_round_ == ( this->round_max_ + uint64_t(1) ) ){
+         if (this->current_round_ == ( this->round_max_ ) ){
             //std::cout << "Current round reset on max round: " << this->current_round_ << std::endl;
             this->current_offset_ = findMaxScore(); 
             resetPrefetcher();
+        }else{
+            this->test_offset_index_ = 0;
+            this->current_round_++;
+            this->total_rounds_++;
         }
     }
      else{
@@ -147,7 +164,12 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
             //printScores();
             //std::cout << "Current round reset on max score: " << this->current_round_ << std::endl;
             // increase the score for that offset
-            this->current_offset_ = this->offset_scores_[this->test_offset_index_].first;
+            uint64_t max_score_offset = this->offset_scores_[this->test_offset_index_].first;
+            // set the max score to be the max possible score
+            all_time_max_score_.set(max_score_); 
+            all_time_max_score_offset_.set(max_score_offset); 
+            this->current_offset_ = max_score_offset;
+            high_score_total_ += max_score_;
             // start a new learning phase with that new offset used for prefetching
             resetPrefetcher();
             return;
@@ -201,12 +223,23 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
 void BestOffsetPrefetcher::initStats(AggregateStat* _parentStat) {
     AggregateStat* s = new AggregateStat();
     s->init(name_.c_str(), "Best Offset prefetcher stats");
+
     prof_emitted_prefetches_.init("pf", "Emitted prefetches");
     recent_requests_hits_.init("bh", "Base addresses found in the recent requests table");
     average_rounds_.init("ar", "Average rounds per learning phase");
+    average_hits_per_round_.init("ah", "Average addresses found in the recent requests table per round");
+    all_time_max_score_.init("tm", "Maximum score of an offset in offset list");
+    all_time_max_score_offset_.init("to", "Offset associated with maximum score");
+    average_max_score_.init("am", "Average highest score per phase");
+
     s->append(&prof_emitted_prefetches_);
     s->append(&recent_requests_hits_);
     s->append(&average_rounds_);
+    s->append(&average_hits_per_round_);
+    s->append(&all_time_max_score_);
+    s->append(&all_time_max_score_offset_);
+    s->append(&average_max_score_);
+    
     _parentStat->append(s);
 } 
 
@@ -238,8 +271,8 @@ uint64_t BestOffsetPrefetcher::access(MemReq& _req) {
     prefetch(_req); 
     // run the prefetch on the address with the current offset
     uint64_t time_to_fetch = resp_cycle - req.cycle;
-    // put the line address and the completion time in the RR
     if (time_to_fetch >= (this->target_latency_ + coherency_time)){ 
+    // put the line address and the completion time in the RR
         this->recent_requests_.insert(req.lineAddr, resp_cycle); 
             // if it's going to DRAM, put it in the RR
             // otherwise, put it in the L3
@@ -336,8 +369,8 @@ void RR::deletion(){
     auto found = hash.find(front.first);
     // should always be true
     if (found != hash.end()){
-        // check if the map entry is pointing to the front 
-        if (found->second.first== list.front().second){
+        // check if the map entry is pointing to the front by its ID
+        if (found->second.first == list.front().second){
             // if it's pointing to the front, delete it
             hash.erase(front.first); 
         }

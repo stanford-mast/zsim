@@ -94,13 +94,15 @@ private:
     uint64_t current_round_;
     uint64_t test_offset_index_;
     uint64_t current_offset_;
-    const int64_t round_max_;
+    const uint64_t round_max_;
     const int64_t max_score_;
     const int64_t init_offset_;
     const uint64_t target_latency_;
     uint64_t total_phases_ = 0;
-    float average_rounds__ = 0;
-    Counter prof_emitted_prefetches_, recent_requests_hits_, average_rounds_;
+    uint64_t total_rounds_ = 0;
+    uint64_t high_score_total_ = 0;
+    float average_hits_per_round__ = 0;
+    Counter prof_emitted_prefetches_, recent_requests_hits_, average_rounds_, average_hits_per_round_, all_time_max_score_, all_time_max_score_offset_, average_max_score_;
 };
 
 #endif
