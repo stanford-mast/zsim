@@ -30,7 +30,7 @@
 #include "stats.h"
 #include "g_std/g_unordered_map.h"
 #include "g_std/g_multimap.h"
-//#define MONITOR_MISS_PCS //Uncomment to enable monitoring of cache misses
+#define MONITOR_MISS_PCS //Uncomment to enable monitoring of cache misses
 
 struct AddrCycle {
     Address addr;   // block address

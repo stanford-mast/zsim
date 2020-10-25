@@ -67,23 +67,19 @@ void BestOffsetPrefetcher::printScores(){
         if (i.second != 0)
             std::cout << "Offset: " << i.first << " Score: " << i.second << std::endl;
     } 
+    std::cout << std::endl;
 }
 
 // function to reset the prefetcher, updating stats, resetting rounds and offsets
 void BestOffsetPrefetcher::resetPrefetcher(){
     // compute a moving average of the amount of rounds per phase
-    //printScores();
-    //average_rounds__ = (current_round_ + total_rounds_) / (++total_phases_);
     total_phases_++;
-    //average_rounds__ = (total_rounds_) / (total_phases_);
-    //average_rounds_.set(average_rounds__);
+#ifndef TEST
     average_rounds_.set(total_rounds_ / total_phases_);
     average_hits_per_round_.set(recent_requests_hits_.get() / total_phases_);
-    //std::cout << "Total phases: " << total_phases_ << std::endl;
-    //std::cout << "Current round: " << current_round_ << std::endl;
-    //std::cout << "Average rounds: " << average_rounds_ << std::endl;
     // set the counter value
     average_max_score_.set(high_score_total_ / total_phases_);
+#endif
     // return all offsets to 0
     resetOffsets();
     // set current round back to 0
@@ -91,8 +87,6 @@ void BestOffsetPrefetcher::resetPrefetcher(){
     // set the test offset back to the end index (for timely prefetches)
     this->test_offset_index_ = 0;
     // the version to clear all history versus hang onto the history from before
-    //this->recent_requests_.clear();
-    //std::cout << "New offset: " << this->current_offset_ << std::endl;
 }
 
 // function to fin the most successful offset of the last learning round
@@ -108,11 +102,13 @@ uint64_t BestOffsetPrefetcher::findMaxScore(){
             max_score_.second = s.second; 
         }
     }
+#ifndef TEST
     // set the max score stat
     if (max_score_.second > all_time_max_score_.get()){
         all_time_max_score_.set(max_score_.second); 
         all_time_max_score_offset_.set(max_score_.first); 
     }
+#endif
     // set the max average score
     high_score_total_ += max_score_.second;
     // return the highest scoring offset in the list
@@ -126,7 +122,6 @@ void BestOffsetPrefetcher::moveTestOffsetPtr(){
         // reset the pointer and set the round up
          // if max out the nuber of rounds, reset the prefetcher
          if (this->current_round_ == ( this->round_max_ ) ){
-            //std::cout << "Current round reset on max round: " << this->current_round_ << std::endl;
             this->current_offset_ = findMaxScore(); 
             resetPrefetcher();
         }else{
@@ -145,43 +140,96 @@ void BestOffsetPrefetcher::moveTestOffsetPtr(){
 // main learning function for the best offset prefetching algorithm
 void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
     // offset to currently test for a base address existing in the recent requests table
+#ifndef SCANNING
     uint64_t test_offset = (this->offset_scores_[this->test_offset_index_]).first;
     // if going off the page by subtracing the offset, don't consider the offset
     uint64_t base_addr = _addr - test_offset;
+#ifdef LIMIT_TO_PAGE
     if ( ((_addr - test_offset) < 0 ) || ( (_addr & page_mask) != ((base_addr) & page_mask))){
         moveTestOffsetPtr();
         return;
     }
+#endif
 
     // check if address in the recent requests table if on current page
     if (this->recent_requests_.exists(base_addr, _cycle) == true){
-        //std::cout << "Finding base" << std::endl;
         // increase the statistic for the number of recent request hits
+#ifndef TEST
         recent_requests_hits_.inc();
+#endif
         // if increasing that index by 1 would put us over the max score reset the prefetcher
         if (this->offset_scores_[this->test_offset_index_].second == (this->max_score_ - uint64_t(1))){
             // function to print scores at the end of the the round. useful for debugging
-            //printScores();
-            //std::cout << "Current round reset on max score: " << this->current_round_ << std::endl;
+            printScores();
             // increase the score for that offset
             uint64_t max_score_offset = this->offset_scores_[this->test_offset_index_].first;
             // set the max score to be the max possible score
+#ifndef TEST
             all_time_max_score_.set(max_score_); 
             all_time_max_score_offset_.set(max_score_offset); 
+#endif
             this->current_offset_ = max_score_offset;
             high_score_total_ += max_score_;
             // start a new learning phase with that new offset used for prefetching
             resetPrefetcher();
+            // hang onto the index to preserve phase
             return;
-        }
-        // otherwise, if found the address but not maxed out, increment its score
+        } // otherwise, if found the address but not maxed out, increment its score
         else{
             this->offset_scores_[this->test_offset_index_].second++; 
         } 
     }
     moveTestOffsetPtr();
-}
+#ifdef TEST
+    this->recent_requests_.insert(_addr, _cycle); 
+#endif
+#else
+    // for implementation of scanning 
+    uint64_t max_score = 1;
+    uint64_t max_score_offset = offset_scores_[0].first;
+    //for (auto offset_score : this->offset_scores_){
+    for (uint64_t i = 0; i < num_offsets; i++){
+        this->total_rounds_++;
+        // check if the scanned offset exists in the table
+        if (this->recent_requests_.exists((_addr - offset_scores_[i].first), _cycle)){
+#ifndef TEST
+            recent_requests_hits_.inc();
+#endif
+            offset_scores_[i].second++; 
+        }
+        if (offset_scores_[i].second >= max_score){
+            max_score_offset = offset_scores_[i].first;
+            max_score = offset_scores_[i].second; 
+            //std::cout << "Updated max score: " << max_score << std::endl; 
+        }
+    }
+    // figure out if we're maxing out the scores
+    if (max_score == this->max_score_){
+        this->current_offset_ = max_score_offset; 
+#ifndef TEST
+            all_time_max_score_.set(max_score); 
+            all_time_max_score_offset_.set(max_score_offset); 
+            high_score_total_ += max_score;
+#endif
+        resetPrefetcher(); 
+    }else{
+        // increase the round
+        this->current_round_ += 1;
+        // if we hit the max found, reset the thing
+        if (this->current_round_ == ( this->round_max_ ) ){
+            high_score_total_ += max_score;
+            this->current_offset_ = max_score_offset;
+            resetPrefetcher();
+        }
+    }
 
+#ifdef TEST
+    this->recent_requests_.insert(_addr, _cycle); 
+#endif 
+
+#endif
+}
+#ifndef TEST
 BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
                                        const g_string& _target,
                                        bool _monitor_GETS,
@@ -202,15 +250,36 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
     if (_degree != 1) {
         std::cout << "Ignoring degree parameter, using default degree of 1" <<std::endl;
     }
+#else
+BestOffsetPrefetcher::BestOffsetPrefetcher(uint64_t _max_score,
+                                uint64_t _init_offset,
+                                uint64_t rr_size,
+                                uint64_t _round_max
+                                ): 
+    round_max_(_round_max), max_score_(_max_score), init_offset_(_init_offset) 
+        {
+#endif
     // init recent requests hash table
-    //uint64_t computed_max_size = num_offsets * round_max_;
     this->recent_requests_ = RR();
     this->recent_requests_.max_size_ = rr_size;
     this->offset_scores_ = std::vector<std::pair<const uint64_t, uint64_t>>();
     // load up the offset scores table with the offset and score
+#ifdef THRASH_OFFSETS
+    offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(1, 0));
+    offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(2, 0));
+    offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(3, 0));
+    offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(8, 0));
+#else
+#ifdef IN_PAGE_OFFSETS
     for (uint64_t i = 1; i <= num_offsets; ++i){ 
         offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(i, 0));
     }
+#else
+    for (uint64_t i = 0; i < num_offsets; ++i){ 
+        offset_scores_.push_back(std::pair<const uint64_t, uint64_t>(paper_offset_list[i], 0)); 
+    }
+#endif
+#endif
     // set the current round to 0 of the learning phase
     this->current_round_ = 0;
     // set the first test offset to the first index in the offset list
@@ -220,6 +289,7 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(const g_string& _name,
 }
 
 // create the stats for the prefetcher with clean data 
+#ifndef TEST
 void BestOffsetPrefetcher::initStats(AggregateStat* _parentStat) {
     AggregateStat* s = new AggregateStat();
     s->init(name_.c_str(), "Best Offset prefetcher stats");
@@ -267,18 +337,13 @@ uint64_t BestOffsetPrefetcher::access(MemReq& _req) {
         return resp_cycle;  //Ignore other requests
     } 
 
-    // if not an instruction fetch, monitored, or a speculative request, execute a prefetch
-    prefetch(_req); 
-    // run the prefetch on the address with the current offset
-    uint64_t time_to_fetch = resp_cycle - req.cycle;
-    if (time_to_fetch >= (this->target_latency_ + coherency_time)){ 
-    // put the line address and the completion time in the RR
-        this->recent_requests_.insert(req.lineAddr, resp_cycle); 
-            // if it's going to DRAM, put it in the RR
-            // otherwise, put it in the L3
+        // execute the prefetch
+        prefetch(_req); 
         // run the learning algo with the current cycle in mind
         learn(req.lineAddr, req.cycle);
-    }
+        // put it in the RR
+        this->recent_requests_.insert(req.lineAddr, resp_cycle); 
+    //}
     return resp_cycle;
 }
 
@@ -286,12 +351,20 @@ uint64_t BestOffsetPrefetcher::access(MemReq& _req) {
 void BestOffsetPrefetcher::prefetch(MemReq& _req) {
         auto &queue_info = d_caches_[_req.srcId];  //This is pair<cache-ptr, skip>
         uint64_t prefetch_location = _req.lineAddr + this->current_offset_;
+#ifdef LIMIT_TO_PAGE
         if ((prefetch_location & page_mask) == (_req.lineAddr & page_mask)){
             queue_info.first->schedulePrefetch(prefetch_location, queue_info.second);
             // increment the number of prefetches made
             prof_emitted_prefetches_.inc();
         }
+#else
+        queue_info.first->schedulePrefetch(prefetch_location, queue_info.second);
+        // increment the number of prefetches made
+        prof_emitted_prefetches_.inc();
+
+#endif
 }
+#endif
 // function to insert an address into the recent requests table
 void RR::insert(uint64_t _addr, uint64_t _cycle){
 #ifdef SLIDING
@@ -316,8 +389,9 @@ void RR::insert(uint64_t _addr, uint64_t _cycle){
     this->size_++;
 #else
     uint64_t mapSlot = _addr % max_size_;
-    //std::cout << "Map slot on insert: " << mapSlot << std::endl;
+    std::cout << "Map slot on insert: " << mapSlot << std::endl;
     if (this->hash.find(mapSlot) != this->hash.end()){
+        std::cout << "Map slot thrashed." << std::endl;
         this->hash.erase(mapSlot); 
         this->size_--;
     }
@@ -335,6 +409,7 @@ bool RR::exists(uint64_t _addr, uint64_t _cycle){
         // make sure the completion cycle for the request is less than the current one
         uint64_t completion = found->second.second;
         if (completion <= _cycle){
+            //std::cout << "Found address in RR" << std::endl;
             return true;
         }
     }
@@ -344,15 +419,13 @@ bool RR::exists(uint64_t _addr, uint64_t _cycle){
     //std::cout << "Map slot on exists: " << mapSlot << std::endl;
     auto found = this->hash.find(mapSlot); 
     if (found != this->hash.end()){
-//        std::cout << "Map slot exists" << std::endl;
-//        std::cout << "Address in map: " << found->second.first << std::endl;
-//        std::cout << "Address looking for: " << _addr << std::endl;
         // make sure the stored address is the same querying for
         if (found->second.first != _addr){
             return false;
         }
         uint64_t completion = found->second.second;
         if (completion <= _cycle){
+            //std::cout << "Found address in RR" << std::endl;
             return true;
         }   
     } 

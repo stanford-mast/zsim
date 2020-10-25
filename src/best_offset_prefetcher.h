@@ -26,22 +26,46 @@ This file contains the function declarations of both the best offset prefetcher
 as well as the recent requests table implemenation.  
 */
 
+//#define TEST
 
 #ifndef BEST_OFFSET_PREFETCHER_H_
 #define BEST_OFFSET_PREFETCHER_H_
 
+#ifndef TEST 
 #include "cache_prefetcher.h"
 #include "filter_cache.h"
 #include "g_std/g_string.h"
 #include "memory_hierarchy.h"
 #include "stats.h" 
 #include "hash.h"
+#else
+#include <map>
+#include <vector>
+#include <utility>
+#include <iostream>
+#include <deque>
+#include <cmath> 
+#endif
 
 #define SLIDING
+#define SCANNING
+//#define LIMIT_TO_PAGE
+//#define IN_PAGE_OFFSETS
+//#define THRASH_OFFSETS
 
 // global constants. Note that these are either not configurable or should not be changed.
-const uint64_t coherency_time = 18; 
+const uint64_t coherency_time = 19; 
+
+#ifdef THRASH_OFFSETS
+const uint64_t num_offsets = 4;
+#else
+#ifdef IN_PAGE_OFFSETS
 const uint64_t num_offsets = 63;
+#else
+const uint64_t num_offsets = 52;
+#endif
+#endif
+
 const uint64_t page_size = pow(2, 12);
 const uint64_t page_mask = 0xFFFFFFFFFFFFFFFF - page_size + 1;
 
@@ -61,6 +85,7 @@ class RR {
         uint64_t id = 0; 
 };
 
+#ifndef TEST
 class BestOffsetPrefetcher : public CachePrefetcher {
 public:
     explicit BestOffsetPrefetcher(const g_string& _name, const g_string& _target,
@@ -75,8 +100,16 @@ public:
     void initStats(AggregateStat* _parentStat) override;
     uint64_t access(MemReq& _req) override;
     void prefetch(MemReq& _req) override;
-    void learn(uint64_t _addr, uint64_t _cycle);
-
+#else
+class BestOffsetPrefetcher {
+public:
+    explicit BestOffsetPrefetcher(uint64_t _round_max,
+                                uint64_t _max_score,
+                                uint64_t _init_offset,
+                                uint64_t rr_size
+                                );
+#endif
+    void learn(uint64_t _addr, uint64_t _cycle); 
     void resetPrefetcher();
 private:
     // recent requests list object
@@ -95,14 +128,19 @@ private:
     uint64_t test_offset_index_;
     uint64_t current_offset_;
     const uint64_t round_max_;
-    const int64_t max_score_;
-    const int64_t init_offset_;
+    const uint64_t max_score_;
+    const uint64_t init_offset_;
+#ifndef TEST
     const uint64_t target_latency_;
+#endif
     uint64_t total_phases_ = 0;
     uint64_t total_rounds_ = 0;
     uint64_t high_score_total_ = 0;
-    float average_hits_per_round__ = 0;
+    float average_hits_per_round__ = 0; 
+#ifndef TEST
     Counter prof_emitted_prefetches_, recent_requests_hits_, average_rounds_, average_hits_per_round_, all_time_max_score_, all_time_max_score_offset_, average_max_score_;
+#endif
+    std::vector<uint64_t> paper_offset_list {1,2,3,4,5,6,8,9,10,12,15,16,18,20,24,25,27,30,32,36,40,45,48,50,54,60,64,72,75,80,81,90,96,100,108,120,125,128,135,144,150,160,162,180,192,200,216,225,240,243,250,256}; 
 };
 
 #endif
