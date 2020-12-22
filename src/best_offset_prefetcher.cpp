@@ -87,12 +87,13 @@ void BestOffsetPrefetcher::resetPrefetcher(){
     // set the test offset back to the end index (for timely prefetches)
     this->test_offset_index_ = 0;
     // the version to clear all history versus hang onto the history from before
+    //std::cout << "New chosen offset: " << this->current_offset_ << std::endl;
 }
 
 // function to fin the most successful offset of the last learning round
 uint64_t BestOffsetPrefetcher::findMaxScore(){
-    // set the max score as 0 to start
-    std::pair<uint64_t,uint64_t>  max_score_ = std::pair<uint64_t,uint64_t>(1, 0); 
+    // set the max score as 1 to start to make it a next line prefetcher in the worst case 
+    std::pair<uint64_t,uint64_t>  max_score_ = std::pair<uint64_t,uint64_t>(1, 1); 
     // run through all the offsets
     for (auto s : offset_scores_){
         if (s.second >= max_score_.second){
@@ -123,6 +124,7 @@ void BestOffsetPrefetcher::moveTestOffsetPtr(){
          // if max out the nuber of rounds, reset the prefetcher
          if (this->current_round_ == ( this->round_max_ ) ){
             this->current_offset_ = findMaxScore(); 
+            //std::cout << "Resetting because of max rnd" << std::endl;
             resetPrefetcher();
         }else{
             this->test_offset_index_ = 0;
@@ -159,10 +161,11 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
 #endif
         // if increasing that index by 1 would put us over the max score reset the prefetcher
         if (this->offset_scores_[this->test_offset_index_].second == (this->max_score_ - uint64_t(1))){
+            //std::cout << "Resetting because of max score" << std::endl;
             // function to print scores at the end of the the round. useful for debugging
-            printScores();
+            //printScores();
             // increase the score for that offset
-            uint64_t max_score_offset = this->offset_scores_[this->test_offset_index_].first;
+            uint64_t max_score_offset = this->offset_scores_[this->test_offset_index_].first; 
             // set the max score to be the max possible score
 #ifndef TEST
             all_time_max_score_.set(max_score_); 
@@ -187,9 +190,7 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
     // for implementation of scanning 
     uint64_t max_score = 1;
     uint64_t max_score_offset = offset_scores_[0].first;
-    //for (auto offset_score : this->offset_scores_){
     for (uint64_t i = 0; i < num_offsets; i++){
-        this->total_rounds_++;
         // check if the scanned offset exists in the table
         if (this->recent_requests_.exists((_addr - offset_scores_[i].first), _cycle)){
 #ifndef TEST
@@ -203,6 +204,7 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
             //std::cout << "Updated max score: " << max_score << std::endl; 
         }
     }
+    //printScores();
     // figure out if we're maxing out the scores
     if (max_score == this->max_score_){
         this->current_offset_ = max_score_offset; 
@@ -211,14 +213,20 @@ void BestOffsetPrefetcher::learn(uint64_t _addr, uint64_t _cycle){
             all_time_max_score_offset_.set(max_score_offset); 
             high_score_total_ += max_score;
 #endif
+        //std::cout << "Resetting because of max score" << std::endl;
         resetPrefetcher(); 
     }else{
         // increase the round
+        //std::cout << "Round value before inc: " << this->current_round_ << std::endl;
         this->current_round_ += 1;
+        //std::cout << "Round value after inc: " << this->current_round_ << std::endl;
+        this->total_rounds_++;
         // if we hit the max found, reset the thing
         if (this->current_round_ == ( this->round_max_ ) ){
             high_score_total_ += max_score;
             this->current_offset_ = max_score_offset;
+            //std::cout << "Highest score: " << max_score << std::endl;
+            //std::cout << "Resetting because of max rnd" << std::endl;
             resetPrefetcher();
         }
     }
@@ -256,9 +264,15 @@ BestOffsetPrefetcher::BestOffsetPrefetcher(uint64_t _max_score,
                                 uint64_t rr_size,
                                 uint64_t _round_max
                                 ): 
-    round_max_(_round_max), max_score_(_max_score), init_offset_(_init_offset) 
-        {
+#ifndef SCANNING
+    round_max_(_round_max), max_score_(_max_score), init_offset_(_init_offset) {
+#else
+        round_max_ = _round_max * num_offsets;
+        max_score_ = _max_score * num_offsets;
+        init_offset_ = _init_offset;
 #endif
+#endif
+
     // init recent requests hash table
     this->recent_requests_ = RR();
     this->recent_requests_.max_size_ = rr_size;
@@ -389,9 +403,9 @@ void RR::insert(uint64_t _addr, uint64_t _cycle){
     this->size_++;
 #else
     uint64_t mapSlot = _addr % max_size_;
-    std::cout << "Map slot on insert: " << mapSlot << std::endl;
+    //std::cout << "Map slot on insert: " << mapSlot << std::endl;
     if (this->hash.find(mapSlot) != this->hash.end()){
-        std::cout << "Map slot thrashed." << std::endl;
+        //std::cout << "Map slot thrashed." << std::endl;
         this->hash.erase(mapSlot); 
         this->size_--;
     }

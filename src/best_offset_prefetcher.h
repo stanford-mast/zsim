@@ -48,10 +48,10 @@ as well as the recent requests table implemenation.
 #endif
 
 #define SLIDING
-#define SCANNING
+//#define SCANNING
 //#define LIMIT_TO_PAGE
 //#define IN_PAGE_OFFSETS
-//#define THRASH_OFFSETS
+#define THRASH_OFFSETS
 
 // global constants. Note that these are either not configurable or should not be changed.
 const uint64_t coherency_time = 19; 
