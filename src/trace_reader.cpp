@@ -196,6 +196,14 @@ void TraceReader::fillCache(uint64_t _vAddr, uint8_t _reported_size, uint8_t *in
       size = _reported_size;
     }
     xed_error_enum_t res;
+    if (inst_bytes != NULL && _reported_size == 3) {
+      if (inst_bytes[0]==0xf3 && inst_bytes[1]==0x0f && inst_bytes[2]==0x1e ) {
+        // replace repz's with nops
+        inst_bytes[0]=0x90;
+        inst_bytes[1]=0x90;
+        inst_bytes[2]=0x90;
+      }
+    }
     if(inst_bytes!=NULL) res = xed_decode(ins, inst_bytes, _reported_size);
     else res = xed_decode(ins, loc, size);
 

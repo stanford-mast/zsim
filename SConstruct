@@ -31,7 +31,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
     #env['CXX'] = 'g++ -flto -flto-report -fuse-linker-plugin'
     #env['CC'] = 'gcc -flto'
     env['CC'] = 'gcc7'
-    env['CXX'] = 'g++-7'
+    env['CXX'] = 'g++'
     #env["LINKFLAGS"] = " -O3 -finline "
     if useIcc:
         env['CC'] = 'icc'
@@ -122,7 +122,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
     ##env["CPPFLAGS"] += " -DDEBUG=1"
 
     # Be a Warning Nazi? (recommended)
-    env["CPPFLAGS"] += " -Werror "
+    # env["CPPFLAGS"] += " -Werror "
     env["CPPFLAGS"] += " -Wno-unused-function "
     env["CPPFLAGS"] += " -Wno-int-in-bool-context "
 
