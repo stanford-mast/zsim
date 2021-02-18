@@ -231,6 +231,9 @@ void *simtrace(void *arg) {
     //TODO heinerl: Only enable buffer for dataflow prefetcher
     uint32_t bufsize = 10000;
 
+    std::unordered_map<uint64_t,uint64_t> unconditional_branch_counts;
+    std::unordered_map<uint64_t,uint64_t> all_branch_counts;
+
     if(ti->type.compare("MEMTRACE") == 0) {
         reader = new TraceReaderMemtrace(ti->tracefile, ti->binaries, bufsize);
     }
@@ -332,6 +335,12 @@ void *simtrace(void *arg) {
                     // NOTE: Assuming custom ops are 0-sized and not branches
                     bbl_size += INS_Size(insi->ins);
                     if (INS_ChangeControlFlow(insi->ins)) {
+                        if (zinfo->measure_branch_cdfs) {
+                            all_branch_counts[insi->pc] += 1;
+                            if (likely(insi->custom_op == CustomOp::NONE) && INS_Category(insi->ins) == XED_CATEGORY_UNCOND_BR) {
+                                unconditional_branch_counts[insi->pc] += 1;
+                            }
+                        }
                       insi = reader->nextInstruction();
                       sim_inst++;
                       break;
@@ -417,6 +426,42 @@ void *simtrace(void *arg) {
     info("Tid: %i finished. Instruction trace size: %lu. Skipped instructions due to unavailable symbols: %lu. BBLs in trace: %lu, dropped BBLs due to context switches: %lu",
          tid, sim_inst, unknown_instrs, simulated_bbls, interrupted_bbls);
 
+    if (zinfo->measure_branch_cdfs) {
+        if (all_branch_counts.size() > 0) {
+            uint64_t total = 0;
+            std::vector<std::pair<uint64_t,uint64_t>> tmp;
+            std::ofstream all_branch_cdfs;
+            all_branch_cdfs.open("all_branch_cdfs.txt");
+            for(const auto & key_value: all_branch_counts) {
+                total+= key_value.second;
+                tmp.push_back(std::make_pair(key_value.first, key_value.second));
+            }
+            std::sort(tmp.begin(), tmp.end(), [](const auto& x, const auto& y){return x.second > y.second;});
+            uint64_t running_total = 0;
+            for(uint64_t i =0; i< tmp.size(); i++) {
+                running_total += tmp[i].second;
+                all_branch_cdfs<<(i+1) << " " <<((100.0 * running_total)/total)<<std::endl;
+            }
+            all_branch_cdfs.close();
+        }
+        if (unconditional_branch_counts.size() > 0) {
+            uint64_t total = 0;
+            std::vector<std::pair<uint64_t,uint64_t>> tmp;
+            std::ofstream uncond_branch_cdfs;
+            uncond_branch_cdfs.open("uncond_branch_cdfs.txt");
+            for(const auto & key_value: unconditional_branch_counts) {
+                total+= key_value.second;
+                tmp.push_back(std::make_pair(key_value.first, key_value.second));
+            }
+            std::sort(tmp.begin(), tmp.end(), [](const auto& x, const auto& y){return x.second > y.second;});
+            uint64_t running_total = 0;
+            for(uint64_t i =0; i< tmp.size(); i++) {
+                running_total += tmp[i].second;
+                uncond_branch_cdfs<<(i+1) << " " <<((100.0 * running_total)/total)<<std::endl;
+            }
+            uncond_branch_cdfs.close();
+        }
+    }
     return wait_for_threads_and_exit(tid);
 }
 

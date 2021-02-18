@@ -225,6 +225,7 @@ struct GlobSimInfo {
 
     uint64_t asmdb_next_line_count;
     uint64_t cs_prefetch_false_positive_rate;
+    bool measure_branch_cdfs;
 };
 
 

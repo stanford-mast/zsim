@@ -1144,6 +1144,7 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->eventQueue = new EventQueue(); //must be instantiated before the memory hierarchy
     
     zinfo->is_first_pass = config.get<bool>("sim.is_first_pass", true);
+    zinfo->measure_branch_cdfs = config.get<bool>("sim.measure_branch_cdfs", false);
     zinfo->prefetch_has_lower_replacement_priority = config.get<bool>("sim.prefetch_has_lower_replacement_priority", false);
 
     zinfo->asmdb_next_line_count = config.get<uint64_t>("sim.asmdb_next_line_count", 0);
