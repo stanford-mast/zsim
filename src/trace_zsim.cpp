@@ -337,7 +337,7 @@ void *simtrace(void *arg) {
                     if (INS_ChangeControlFlow(insi->ins)) {
                         if (zinfo->measure_branch_cdfs) {
                             all_branch_counts[insi->pc] += 1;
-                            if (likely(insi->custom_op == CustomOp::NONE) && INS_Category(insi->ins) == XED_CATEGORY_UNCOND_BR) {
+                            if (likely(insi->custom_op == CustomOp::NONE) && INS_Category(insi->ins) != XED_CATEGORY_COND_BR) {
                                 unconditional_branch_counts[insi->pc] += 1;
                             }
                         }
